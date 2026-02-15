@@ -7,10 +7,11 @@ import { query } from '@/lib/db';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { deviceId: string } }
+  context: { params: Promise<{ deviceId: string }> }
 ) {
   try {
-    const deviceId = params.deviceId;
+    // Await params (Next.js 15 requirement)
+    const { deviceId } = await context.params;
 
     // Get device info
     const deviceResult = await query(

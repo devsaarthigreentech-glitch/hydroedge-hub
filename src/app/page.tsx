@@ -7,9 +7,8 @@ import { DeviceList } from "@/components/devices/DeviceList";
 import { DeviceDetail } from "@/components/devices/DeviceDetail";
 import { CustomerList } from "@/components/customers/CustomerList";
 import { AddCustomerModal } from "@/components/customers/AddCustomerModal";
-import { MOCK_CUSTOMERS, MOCK_DEVICES, generateTelemetry } from "@/data/mock-data";
 import { filterDevices } from "@/lib/utils";
-import { Device, ViewType, Command } from "@/types";
+import { Device, Customer, ViewType, Command } from "@/types";
 
 export default function HomePage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -21,23 +20,87 @@ export default function HomePage() {
   const [commandHistory, setCommandHistory] = useState<Command[]>([]);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
 
-  // Simulate real-time telemetry updates
+  // Real data from API
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch customers from database
+  useEffect(() => {
+    async function fetchCustomers() {
+      try {
+        const response = await fetch('/api/customers');
+        const data = await response.json();
+        
+        if (data.success) {
+          setCustomers(data.data);
+        } else {
+          setError(data.error || 'Failed to fetch customers');
+        }
+      } catch (err: any) {
+        console.error('Error fetching customers:', err);
+        setError(err.message);
+      }
+    }
+    
+    fetchCustomers();
+  }, []);
+
+  // Fetch devices from database
+  useEffect(() => {
+    async function fetchDevices() {
+      try {
+        setLoading(true);
+        const url = customerFilter === 'all' 
+          ? '/api/devices'
+          : `/api/devices?customer_id=${customerFilter}`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success) {
+          setDevices(data.data);
+        } else {
+          setError(data.error || 'Failed to fetch devices');
+        }
+      } catch (err: any) {
+        console.error('Error fetching devices:', err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchDevices();
+  }, [customerFilter]);
+
+  // Fetch real-time telemetry from database
   useEffect(() => {
     if (selectedDevice) {
-      setTelemetryData(generateTelemetry(selectedDevice.id));
-      const interval = setInterval(() => {
-        setTelemetryData(generateTelemetry(selectedDevice.id));
-      }, 5000);
+      async function fetchTelemetry() {
+        try {
+          const response = await fetch(`/api/telemetry/${selectedDevice?.id}`);
+          const data = await response.json();
+          
+          if (data.success) {
+            setTelemetryData(data.data);
+          }
+        } catch (err) {
+          console.error('Error fetching telemetry:', err);
+        }
+      }
+      
+      fetchTelemetry();
+      
+      // Auto-refresh telemetry every 5 seconds
+      const interval = setInterval(fetchTelemetry, 5000);
       return () => clearInterval(interval);
     }
   }, [selectedDevice]);
 
   // Filter devices
-  const filteredDevices = filterDevices(
-    MOCK_DEVICES,
-    searchQuery,
-    customerFilter
-  );
+  const filteredDevices = filterDevices(devices, searchQuery, customerFilter);
 
   const handleDeviceSelect = (device: Device) => {
     setSelectedDevice(device);
@@ -59,7 +122,7 @@ export default function HomePage() {
 
     setCommandHistory((prev) => [newCommand, ...prev]);
 
-    // Simulate command execution
+    // TODO: Send to actual command API
     setTimeout(() => {
       setCommandHistory((prev) =>
         prev.map((c) =>
@@ -80,6 +143,78 @@ export default function HomePage() {
     setCustomerFilter(customerId);
     setCurrentView("devices");
   };
+
+  // Show loading state
+  if (loading && devices.length === 0) {
+    return (
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        background: "#1a1a1a",
+        color: "#e0e0e0",
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{
+            border: "3px solid #333",
+            borderTop: "3px solid #00c853",
+            borderRadius: "50%",
+            width: "50px",
+            height: "50px",
+            animation: "spin 1s linear infinite",
+            margin: "0 auto 20px",
+          }}></div>
+          <div>Loading data from database...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        background: "#1a1a1a",
+        color: "#ef4444",
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        <div style={{ textAlign: "center", maxWidth: "500px", padding: "20px" }}>
+          <div style={{ fontSize: "48px", marginBottom: "20px" }}>⚠️</div>
+          <div style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "10px" }}>
+            Database Connection Error
+          </div>
+          <div style={{ fontSize: "14px", color: "#94a3b8", marginBottom: "20px" }}>
+            {error}
+          </div>
+          <div style={{ fontSize: "12px", color: "#6b7280" }}>
+            Check your .env.local file and ensure PostgreSQL is running
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              marginTop: "20px",
+              padding: "10px 20px",
+              background: "#00c853",
+              color: "#000",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontWeight: "bold",
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -104,7 +239,7 @@ export default function HomePage() {
           setCurrentView(view);
           setSelectedDevice(null);
         }}
-        customers={MOCK_CUSTOMERS}
+        customers={customers}
         customerFilter={customerFilter}
         onCustomerFilterChange={handleCustomerFilterChange}
       />
@@ -118,7 +253,7 @@ export default function HomePage() {
           currentView={currentView}
           customerFilter={customerFilter}
           onCustomerFilterChange={handleCustomerFilterChange}
-          customers={MOCK_CUSTOMERS}
+          customers={customers}
           deviceCount={filteredDevices.length}
         />
 
@@ -128,7 +263,7 @@ export default function HomePage() {
           {currentView === "devices" && !selectedDevice && (
             <DeviceList
               devices={filteredDevices}
-              customers={MOCK_CUSTOMERS}
+              customers={customers}
               onDeviceSelect={handleDeviceSelect}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
@@ -140,7 +275,7 @@ export default function HomePage() {
             <DeviceDetail
               device={selectedDevice}
               onClose={handleCloseDevice}
-              customers={MOCK_CUSTOMERS}
+              customers={customers}
               telemetry={telemetryData}
               commands={commandHistory}
               onSendCommand={handleSendCommand}
@@ -150,8 +285,8 @@ export default function HomePage() {
           {/* Customer List View */}
           {currentView === "customers" && !selectedDevice && (
             <CustomerList
-              customers={MOCK_CUSTOMERS}
-              devices={MOCK_DEVICES}
+              customers={customers}
+              devices={devices}
               onSelectCustomer={handleCustomerFilterChange}
               onAddCustomer={() => setShowCustomerModal(true)}
             />
@@ -163,7 +298,7 @@ export default function HomePage() {
       <AddCustomerModal
         isOpen={showCustomerModal}
         onClose={() => setShowCustomerModal(false)}
-        customers={MOCK_CUSTOMERS}
+        customers={customers}
       />
     </div>
   );
