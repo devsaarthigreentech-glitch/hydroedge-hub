@@ -1,6 +1,5 @@
 // ============================================================================
 // API ROUTE: /api/devices
-// GET - Fetch all devices with latest GPS data
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -8,11 +7,10 @@ import { query } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   try {
-    // Get query parameters for filtering
     const searchParams = request.nextUrl.searchParams;
     const customerId = searchParams.get('customer_id');
 
-    // SQL query to fetch devices with their latest GPS data
+    // Query that matches your database structure
     let sql = `
       SELECT 
         d.id,
@@ -30,9 +28,9 @@ export async function GET(request: NextRequest) {
         d.tags,
         d.created_at,
         d.updated_at,
-        g.latitude as last_latitude,
-        g.longitude as last_longitude,
-        g.timestamp as last_location_time
+        latest_gps.latitude as last_latitude,
+        latest_gps.longitude as last_longitude,
+        latest_gps.timestamp as last_location_time
       FROM devices d
       LEFT JOIN LATERAL (
         SELECT latitude, longitude, timestamp
@@ -40,14 +38,14 @@ export async function GET(request: NextRequest) {
         WHERE device_id = d.id
         ORDER BY timestamp DESC
         LIMIT 1
-      ) g ON true
+      ) latest_gps ON true
+      WHERE d.deleted_at IS NULL
     `;
 
     const params: any[] = [];
 
-    // Add customer filter if provided
     if (customerId && customerId !== 'all') {
-      sql += ` WHERE d.customer_id = $1`;
+      sql += ` AND d.customer_id = $1`;
       params.push(customerId);
     }
 
@@ -73,7 +71,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create new device
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -88,13 +85,9 @@ export async function POST(request: NextRequest) {
       sim_number,
     } = body;
 
-    // Validate required fields
-    if (!imei || !device_name || !device_type || !manufacturer || !customer_id) {
+    if (!imei || !customer_id) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'Missing required fields',
-        },
+        { success: false, error: 'Missing required fields: imei and customer_id' },
         { status: 400 }
       );
     }
@@ -111,13 +104,13 @@ export async function POST(request: NextRequest) {
 
     const result = await query(sql, [
       imei,
-      device_name,
-      device_type,
-      manufacturer,
+      device_name || null,
+      device_type || 'FMC650',
+      manufacturer || 'Teltonika',
       customer_id,
-      asset_name,
-      asset_type,
-      sim_number,
+      asset_name || null,
+      asset_type || null,
+      sim_number || null,
     ]);
 
     return NextResponse.json({
