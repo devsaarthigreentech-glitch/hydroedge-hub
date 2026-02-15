@@ -1,40 +1,42 @@
+// Replace the existing file with this updated version
 // ============================================================================
 // TYPE DEFINITIONS - SGT Hydroedge Admin Panel
 // ============================================================================
 
 export type ConnectionStatus = "online" | "offline";
-export type DeviceStatus = "active" | "inactive" | "suspended";
+export type DeviceStatus = "active" | "inactive" | "suspended" | "maintenance" | "stolen";
 export type CustomerStatus = "active" | "trial" | "suspended" | "inactive";
 export type CustomerType = "customer" | "vendor" | "partner" | "dealer";
 export type CommandStatus = "sent" | "executed" | "failed" | "timeout";
 export type TelemetryType = "system" | "sensor";
 
 export interface Customer {
-  id: string;
+  id: string; // UUID
   name: string;
-  company_name: string;
+  email: string;
+  phone?: string;
+  company_name?: string;
   customer_type: CustomerType;
   status: CustomerStatus;
-  parent_customer_id: string | null;
+  parent_customer_id: string | null; // UUID
   hierarchy_level: number;
   max_devices: number;
-  city: string;
-  country: string;
-  email?: string;
-  phone?: string;
+  city?: string;
+  state?: string;
+  country?: string;
   created_at: string;
   updated_at?: string;
 }
 
 export interface Device {
-  id: string;
+  id: string; // UUID
   imei: string;
-  device_name: string;
+  device_name?: string;
   device_type: string;
   manufacturer: string;
   status: DeviceStatus;
   connection_status: ConnectionStatus;
-  customer_id: string;
+  customer_id: string; // UUID
   asset_name?: string;
   asset_type?: string;
   sim_number?: string;
@@ -67,7 +69,7 @@ export interface Command {
 
 export interface GPSRecord {
   id: number;
-  device_id: string;
+  device_id: string; // UUID
   timestamp: string;
   latitude: number;
   longitude: number;
@@ -80,7 +82,7 @@ export interface GPSRecord {
 
 export interface IORecord {
   id: number;
-  device_id: string;
+  device_id: string; // UUID
   timestamp: string;
   io_id: number;
   io_value: number;

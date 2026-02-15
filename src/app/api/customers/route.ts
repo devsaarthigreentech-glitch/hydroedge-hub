@@ -13,6 +13,8 @@ export async function GET() {
       SELECT 
         id,
         name,
+        email,
+        phone,
         company_name,
         customer_type,
         status,
@@ -20,12 +22,12 @@ export async function GET() {
         hierarchy_level,
         max_devices,
         city,
+        state,
         country,
-        email,
-        phone,
         created_at,
         updated_at
       FROM customers
+      WHERE deleted_at IS NULL
       ORDER BY hierarchy_level, name
     `;
 
@@ -54,43 +56,33 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       name,
+      email,
+      phone,
       company_name,
       customer_type,
       parent_customer_id,
       max_devices,
       city,
+      state,
       country,
-      email,
-      phone,
     } = body;
 
     // Validate required fields
-    if (!name || !company_name || !customer_type) {
+    if (!name || !email) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Missing required fields',
+          error: 'Missing required fields: name and email',
         },
         { status: 400 }
       );
     }
 
-    // Calculate hierarchy level
-    let hierarchy_level = 0;
-    if (parent_customer_id) {
-      const parentResult = await query(
-        'SELECT hierarchy_level FROM customers WHERE id = $1',
-        [parent_customer_id]
-      );
-      if (parentResult.rows.length > 0) {
-        hierarchy_level = parentResult.rows[0].hierarchy_level + 1;
-      }
-    }
-
+    // Note: hierarchy_path and hierarchy_level are auto-calculated by trigger
     const sql = `
       INSERT INTO customers (
-        name, company_name, customer_type, parent_customer_id,
-        hierarchy_level, max_devices, city, country, email, phone,
+        name, email, phone, company_name, customer_type, 
+        parent_customer_id, max_devices, city, state, country,
         status
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active')
@@ -99,15 +91,15 @@ export async function POST(request: NextRequest) {
 
     const result = await query(sql, [
       name,
-      company_name,
-      customer_type,
-      parent_customer_id,
-      hierarchy_level,
-      max_devices || 10,
-      city,
-      country,
       email,
-      phone,
+      phone || null,
+      company_name || name,
+      customer_type || 'customer',
+      parent_customer_id || null,
+      max_devices || 10,
+      city || null,
+      state || null,
+      country || null,
     ]);
 
     return NextResponse.json({
