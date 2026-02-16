@@ -113,7 +113,7 @@ export function DeviceDetail({
           }}
         >
           <Icons.Power />
-        </button>
+        </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "#00e676" }}>
             {device.manufacturer} {device.device_type}
@@ -196,7 +196,7 @@ export function DeviceDetail({
         {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} />}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}  {/* <<<< ADD THIS */}
         {selectedTab === "commands" && (
-          <CommandsTab device={device} />  {/* <<<< REMOVE commands and onSendCommand props */}
+          <CommandsTab device={device} /> 
         )}
         {selectedTab === "logs" && <LogsTab device={device} />}
         {selectedTab === "settings" && <SettingsTab device={device} />}
