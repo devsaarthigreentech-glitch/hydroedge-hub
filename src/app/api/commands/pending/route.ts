@@ -19,38 +19,24 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get device_id from IMEI
-    const deviceResult = await query(
-      `SELECT id FROM devices WHERE imei = $1 AND deleted_at IS NULL`,
-      [imei]
-    );
-
-    if (deviceResult.rows.length === 0) {
-      return NextResponse.json({
-        success: true,
-        data: [],
-        message: 'Device not found',
-      });
-    }
-
-    const deviceId = deviceResult.rows[0].id;
-
-    // Get pending commands
+    // Get pending commands directly by IMEI
     const sql = `
       SELECT 
         id,
         device_id,
-        command,
+        imei,
+        command_type,
+        command_text,
         status,
         sent_at
       FROM command_history
-      WHERE device_id = $1 
+      WHERE imei = $1 
         AND status = 'pending'
       ORDER BY sent_at ASC
       LIMIT 10
     `;
 
-    const result = await query(sql, [deviceId]);
+    const result = await query(sql, [imei]);
 
     return NextResponse.json({
       success: true,

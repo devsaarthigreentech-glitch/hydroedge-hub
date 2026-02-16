@@ -19,19 +19,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Insert into command_history table with status 'pending'
+    // Get device IMEI
+    const deviceResult = await query(
+      'SELECT imei FROM devices WHERE id = $1',
+      [device_id]
+    );
+
+    if (deviceResult.rows.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Device not found' },
+        { status: 404 }
+      );
+    }
+
+    const imei = deviceResult.rows[0].imei;
+
+    // Determine command type from command text
+    const command_type = command.split(' ')[0]; // e.g., "getinfo", "setdigout"
+
+    // Insert into command_history table
     const sql = `
       INSERT INTO command_history (
-        device_id, 
-        command, 
-        status, 
+        device_id,
+        imei,
+        command_type,
+        command_text,
+        status,
+        source,
         sent_at
       )
-      VALUES ($1, $2, 'pending', NOW())
+      VALUES ($1, $2, $3, $4, 'pending', 'admin_panel', NOW())
       RETURNING *
     `;
 
-    const result = await query(sql, [device_id, command]);
+    const result = await query(sql, [device_id, imei, command_type, command]);
 
     return NextResponse.json({
       success: true,
@@ -68,7 +89,9 @@ export async function GET(request: NextRequest) {
       SELECT 
         id,
         device_id,
-        command,
+        imei,
+        command_type,
+        command_text as command,
         status,
         sent_at,
         executed_at,
