@@ -7,7 +7,7 @@ export type ConnectionStatus = "online" | "offline";
 export type DeviceStatus = "active" | "inactive" | "suspended" | "maintenance" | "stolen";
 export type CustomerStatus = "active" | "trial" | "suspended" | "inactive";
 export type CustomerType = "customer" | "vendor" | "partner" | "dealer";
-export type CommandStatus = "sent" | "executed" | "failed" | "timeout";
+export type CommandStatus = "pending" | "sent" | "executed" | "failed" | "timeout";
 export type TelemetryType = "system" | "sensor";
 
 export interface Customer {
@@ -65,6 +65,7 @@ export interface Command {
   executed_at?: string;
   response?: string;
   error?: string;
+  error_message?: string;
 }
 
 export interface GPSRecord {
