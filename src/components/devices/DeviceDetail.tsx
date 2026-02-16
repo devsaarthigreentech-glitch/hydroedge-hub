@@ -6,6 +6,7 @@ import { Icons } from "@/components/ui/Icons";
 import { InfoTab } from "../device-detail/InfoTab";
 import { EditTab } from "../device-detail/EditTab";
 import { TelemetryTab } from "../device-detail/TelemetryTab";
+import { TelemetryGraphTab } from "../device-detail/TelemetryGraphTab";
 import { CommandsTab } from "../device-detail/CommandsTab";
 import { LogsTab } from "../device-detail/LogsTab";
 import { SettingsTab } from "../device-detail/SettingsTab";
@@ -36,6 +37,7 @@ export function DeviceDetail({
     { key: "info" as DeviceTab, label: "INFO", icon: Icons.Info },
     { key: "edit" as DeviceTab, label: "EDIT", icon: Icons.Edit },
     { key: "telemetry" as DeviceTab, label: "TELEMETRY", icon: Icons.Telemetry },
+    { key: "graphs" as DeviceTab, label: "GRAPHS", icon: Icons.TrendingUp }, // <<<< ADD THIS
     { key: "commands" as DeviceTab, label: "COMMANDS", icon: Icons.Commands },
     { key: "logs" as DeviceTab, label: "LOGS & MESSAGES", icon: Icons.Logs },
     { key: "settings" as DeviceTab, label: "SETTINGS", icon: Icons.Settings },
@@ -111,7 +113,7 @@ export function DeviceDetail({
           }}
         >
           <Icons.Power />
-        </div>
+        </button>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "#00e676" }}>
             {device.manufacturer} {device.device_type}
@@ -192,12 +194,9 @@ export function DeviceDetail({
         {selectedTab === "info" && <InfoTab device={device} customer={customer} />}
         {selectedTab === "edit" && <EditTab device={device} customers={customers} />}
         {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} />}
+        {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}  {/* <<<< ADD THIS */}
         {selectedTab === "commands" && (
-          <CommandsTab
-            device={device}
-            commands={commands}
-            onSendCommand={onSendCommand}
-          />
+          <CommandsTab device={device} />  {/* <<<< REMOVE commands and onSendCommand props */}
         )}
         {selectedTab === "logs" && <LogsTab device={device} />}
         {selectedTab === "settings" && <SettingsTab device={device} />}
