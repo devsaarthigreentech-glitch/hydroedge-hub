@@ -3,7 +3,7 @@
 import React from "react";
 import { Icons } from "@/components/ui/Icons";
 import { Device, Customer } from "@/types";
-import { timeAgo } from "@/lib/utils";
+import { THEME } from "@/lib/theme";
 
 interface TopBarProps {
   onToggleSidebar: () => void;
@@ -24,95 +24,133 @@ export function TopBar({
   customers,
   deviceCount,
 }: TopBarProps) {
+  const customer = customers.find((c) => c.id === customerFilter);
+
   return (
     <div
       style={{
-        height: 48,
-        background: "#242424",
-        borderBottom: "1px solid #333",
+        height: 60,
+        background: THEME.background.card,
+        borderBottom: `1px solid ${THEME.border.light}`,
         display: "flex",
         alignItems: "center",
-        padding: "0 16px",
-        gap: 12,
+        padding: "0 24px",
+        gap: 20,
         flexShrink: 0,
+        boxShadow: THEME.shadow.sm,
       }}
     >
-      <button
-        onClick={onToggleSidebar}
-        style={{
-          background: "none",
-          border: "none",
-          color: "#94a3b8",
-          cursor: "pointer",
-          padding: 4,
-          display: "flex",
-        }}
-      >
+      {/* Breadcrumb */}
+      <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
         <Icons.Menu />
-      </button>
+        <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span>
+        
+        {currentView === "devices" && (
+          <>
+            <span style={{ fontSize: 14, fontWeight: 600, color: THEME.text.primary }}>
+              Devices
+            </span>
+            {customerFilter !== "all" && customer && (
+              <>
+                <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span>
+                <span style={{ fontSize: 14, color: THEME.text.secondary }}>
+                  {customer.name}
+                </span>
+              </>
+            )}
+          </>
+        )}
+        
+        {currentView === "customers" && (
+          <span style={{ fontSize: 14, fontWeight: 600, color: THEME.text.primary }}>
+            Customers
+          </span>
+        )}
+        
+        {selectedDevice && (
+          <>
+            <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span>
+            <span style={{ fontSize: 14, color: THEME.text.secondary }}>
+              {selectedDevice.device_name}
+            </span>
+          </>
+        )}
+      </div>
 
-      <span
-        style={{
-          fontWeight: 700,
-          fontSize: 15,
-          color: "#f1f5f9",
-          letterSpacing: 0.5,
-        }}
-      >
-        {selectedDevice
-          ? selectedDevice.device_name
-          : currentView === "customers"
-          ? "Customers"
-          : "Devices"}
-      </span>
-
-      <div style={{ flex: 1 }} />
-
-      {selectedDevice && (
+      {/* Stats */}
+      <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            fontSize: 11,
-            color: "#94a3b8",
+            gap: 8,
+            padding: "8px 16px",
+            background: THEME.background.secondary,
+            borderRadius: 8,
+            border: `1px solid ${THEME.border.light}`,
           }}
         >
-          <span style={{ color: "#00e676", fontWeight: 600 }}>
-            {selectedDevice.manufacturer} {selectedDevice.device_type}
-          </span>
-          <span>·</span>
-          <span>{timeAgo(selectedDevice.last_location_time)}</span>
+          <Icons.Devices />
+          <div>
+            <div style={{ fontSize: 10, color: THEME.text.tertiary, fontWeight: 500 }}>
+              Total Devices
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: THEME.text.primary }}>
+              {deviceCount}
+            </div>
+          </div>
         </div>
-      )}
 
-      {!selectedDevice && currentView === "devices" && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "#6b7280" }}>
-            {deviceCount} device{deviceCount !== 1 ? "s" : ""}
-          </span>
-          <select
-            value={customerFilter}
-            onChange={(e) => onCustomerFilterChange(e.target.value)}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 16px",
+            background: `linear-gradient(135deg, ${THEME.primary[50]} 0%, ${THEME.primary[100]} 100%)`,
+            borderRadius: 8,
+            border: `1px solid ${THEME.primary[200]}`,
+          }}
+        >
+          <div
             style={{
-              background: "#333",
-              border: "1px solid #444",
-              borderRadius: 6,
-              color: "#e0e0e0",
-              padding: "4px 8px",
-              fontSize: 11,
-              outline: "none",
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: THEME.status.success,
             }}
-          >
-            <option value="all">All Customers</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            className="animate-pulse"
+          />
+          <div>
+            <div style={{ fontSize: 10, color: THEME.primary[700], fontWeight: 500 }}>
+              Online
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: THEME.primary[700] }}>
+              {deviceCount}
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* User Profile */}
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: "50%",
+            background: `linear-gradient(135deg, ${THEME.primary[400]} 0%, ${THEME.primary[600]} 100%)`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "white",
+            fontWeight: 700,
+            fontSize: 14,
+            cursor: "pointer",
+            border: `2px solid ${THEME.primary[200]}`,
+          }}
+        >
+          SA
+        </div>
+      </div>
     </div>
   );
 }
