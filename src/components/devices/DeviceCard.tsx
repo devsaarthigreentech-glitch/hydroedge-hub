@@ -15,6 +15,17 @@ interface DeviceCardProps {
 export function DeviceCard({ device, customer, onSelect }: DeviceCardProps) {
   const isOnline = device.connection_status === "online";
 
+  // Helper function to safely format coordinates
+  const formatCoordinate = (coord: number | string | undefined): string => {
+    if (!coord) return "";
+    const num = typeof coord === "string" ? parseFloat(coord) : coord;
+    return isNaN(num) ? "" : num.toFixed(4);
+  };
+
+  const lat = formatCoordinate(device.last_latitude);
+  const lon = formatCoordinate(device.last_longitude);
+  const hasGPS = lat && lon;
+
   return (
     <div
       onClick={onSelect}
@@ -113,14 +124,12 @@ export function DeviceCard({ device, customer, onSelect }: DeviceCardProps) {
         }}
       >
         <InfoItem
-          icon={<Icons.Info />}
+          icon={<Icons.MapPin />}
           label="Location"
-          value={device.last_latitude && device.last_longitude
-            ? `${device.last_latitude.toFixed(4)}, ${device.last_longitude.toFixed(4)}`
-            : "No GPS"}
+          value={hasGPS ? `${lat}, ${lon}` : "No GPS"}
         />
         <InfoItem
-          icon={<Icons.Info />}
+          icon={<Icons.Clock />}
           label="Last Seen"
           value={device.last_location_time ? timeAgo(device.last_location_time) : "Never"}
         />
