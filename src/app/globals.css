@@ -1,229 +1,181 @@
 /* ============================================================================
-   SGT Hydroedge Admin Panel - Global Styles
-   Flespi-inspired Dark Theme
+   SGT HYDROEDGE - SUSTAINABLE ENERGY DESIGN SYSTEM
    ============================================================================ */
 
-/* Font Import */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-/* CSS Reset */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-/* Root Variables */
-:root {
-  /* Colors */
-  --bg-dark: #1a1a1a;
-  --bg-darker: #1e1e1e;
-  --bg-darkest: #242424;
-  --bg-sidebar: #2d1b4e;
-  
-  --border-light: #333;
-  --border-lighter: #444;
-  --border-dark: #2a2a2a;
-  --border-sidebar: #3d2b5e;
-  
-  --text-primary: #f1f5f9;
-  --text-secondary: #e0e0e0;
-  --text-muted: #94a3b8;
-  --text-disabled: #6b7280;
-  --text-faint: #525252;
-  
-  --primary: #7c3aed;
-  --primary-light: #c4b5fd;
-  --primary-dark: #6d28d9;
-  
-  --success: #00c853;
-  --success-light: #00e676;
-  --success-lighter: #4ade80;
-  
-  --warning: #fbbf24;
-  --danger: #ef4444;
-  --info: #3b82f6;
-  
-  --online: #00c853;
-  --offline: #424242;
-  
-  /* Spacing */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 12px;
-  --spacing-lg: 16px;
-  --spacing-xl: 20px;
-  --spacing-2xl: 24px;
-  
-  /* Border Radius */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 10px;
-  --radius-2xl: 12px;
-  
-  /* Transitions */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.2s ease;
-  --transition-slow: 0.3s ease;
-}
-
-/* Body Styles */
-html,
-body {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-body {
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: var(--bg-dark);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* Scrollbar Styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--bg-darker);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--border-lighter);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
-
-/* Selection */
-::selection {
-  background: var(--primary);
-  color: white;
-}
-
-/* Focus Outline */
-*:focus {
-  outline: none;
-}
-
-*:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-/* Link Styles */
-a {
-  color: var(--primary-light);
-  text-decoration: none;
-  transition: color var(--transition-fast);
-}
-
-a:hover {
-  color: var(--success-light);
-}
-
-/* Button Reset */
-button {
-  font-family: inherit;
-  cursor: pointer;
-}
-
-/* Input Reset */
-input,
-select,
-textarea {
-  font-family: inherit;
-  font-size: inherit;
-}
-
-/* Disable text selection on UI elements */
-.no-select {
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-}
-
-/* Utility Classes */
-.text-mono {
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.text-primary {
-  color: var(--text-primary);
-}
-
-.text-muted {
-  color: var(--text-muted);
-}
-
-.text-success {
-  color: var(--success-lighter);
-}
-
-.text-danger {
-  color: var(--danger);
-}
-
-/* Animation Classes */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes slideInRight {
-  from {
-    transform: translateX(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.fade-in {
-  animation: fadeIn 0.3s ease;
-}
-
-.slide-in-right {
-  animation: slideInRight 0.3s ease;
-}
-
-/* Loading Spinner */
-.spinner {
-  border: 2px solid var(--border-light);
-  border-top: 2px solid var(--primary);
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+   * {
+     box-sizing: border-box;
+     padding: 0;
+     margin: 0;
+   }
+   
+   html,
+   body {
+     max-width: 100vw;
+     overflow-x: hidden;
+     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+     background: #fafafa;
+     color: #18181b;
+     font-size: 14px;
+     line-height: 1.5;
+     -webkit-font-smoothing: antialiased;
+     -moz-osx-font-smoothing: grayscale;
+   }
+   
+   code, pre {
+     font-family: 'JetBrains Mono', 'Fira Code', monospace;
+   }
+   
+   /* ============================================================================
+      SCROLLBAR STYLING
+      ============================================================================ */
+   
+   ::-webkit-scrollbar {
+     width: 10px;
+     height: 10px;
+   }
+   
+   ::-webkit-scrollbar-track {
+     background: #f4f4f5;
+   }
+   
+   ::-webkit-scrollbar-thumb {
+     background: #d4d4d8;
+     border-radius: 5px;
+   }
+   
+   ::-webkit-scrollbar-thumb:hover {
+     background: #a1a1aa;
+   }
+   
+   /* ============================================================================
+      ANIMATIONS
+      ============================================================================ */
+   
+   @keyframes spin {
+     to {
+       transform: rotate(360deg);
+     }
+   }
+   
+   @keyframes pulse {
+     0%, 100% {
+       opacity: 1;
+     }
+     50% {
+       opacity: 0.5;
+     }
+   }
+   
+   @keyframes fadeIn {
+     from {
+       opacity: 0;
+       transform: translateY(10px);
+     }
+     to {
+       opacity: 1;
+       transform: translateY(0);
+     }
+   }
+   
+   @keyframes slideIn {
+     from {
+       transform: translateX(-100%);
+     }
+     to {
+       transform: translateX(0);
+     }
+   }
+   
+   @keyframes glow {
+     0%, 100% {
+       box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+     }
+     50% {
+       box-shadow: 0 0 30px rgba(34, 197, 94, 0.6);
+     }
+   }
+   
+   /* ============================================================================
+      UTILITY CLASSES
+      ============================================================================ */
+   
+   .animate-spin {
+     animation: spin 1s linear infinite;
+   }
+   
+   .animate-pulse {
+     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+   }
+   
+   .animate-fadeIn {
+     animation: fadeIn 0.3s ease-out;
+   }
+   
+   .animate-glow {
+     animation: glow 2s ease-in-out infinite;
+   }
+   
+   /* ============================================================================
+      BUTTON RESETS
+      ============================================================================ */
+   
+   button {
+     font-family: inherit;
+     font-size: inherit;
+     cursor: pointer;
+     transition: all 0.2s ease;
+   }
+   
+   button:active {
+     transform: scale(0.98);
+   }
+   
+   input, textarea, select {
+     font-family: inherit;
+     font-size: inherit;
+   }
+   
+   /* ============================================================================
+      SELECTION COLORS
+      ============================================================================ */
+   
+   ::selection {
+     background: #bbf7d0;
+     color: #18181b;
+   }
+   
+   ::-moz-selection {
+     background: #bbf7d0;
+     color: #18181b;
+   }
+   
+   /* ============================================================================
+      FOCUS STYLES
+      ============================================================================ */
+   
+   *:focus {
+     outline: 2px solid #22c55e;
+     outline-offset: 2px;
+   }
+   
+   *:focus:not(:focus-visible) {
+     outline: none;
+   }
+   
+   /* ============================================================================
+      ACCESSIBILITY
+      ============================================================================ */
+   
+   .sr-only {
+     position: absolute;
+     width: 1px;
+     height: 1px;
+     padding: 0;
+     margin: -1px;
+     overflow: hidden;
+     clip: rect(0, 0, 0, 0);
+     white-space: nowrap;
+     border-width: 0;
+   }
