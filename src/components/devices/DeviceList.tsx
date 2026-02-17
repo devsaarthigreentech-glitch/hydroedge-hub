@@ -1,11 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Device, Customer } from "@/types";
-import { DeviceCard } from "./DeviceCard";
 import { DeviceSearchBar } from "./DeviceSearchBar";
 import { Icons } from "@/components/ui/Icons";
 import { THEME } from "@/lib/theme";
+import { timeAgo } from "@/lib/utils";
 
 interface DeviceListProps {
   devices: Device[];
@@ -63,8 +63,33 @@ export function DeviceList({
         </div>
       </div>
 
-      {/* Device Grid */}
-      <div style={{ flex: 1, overflow: "auto", padding: 20, background: THEME.background.secondary }}>
+      {/* Device Table Header */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "50px 1fr 200px 150px 150px 120px 100px",
+          gap: 16,
+          padding: "12px 20px",
+          background: THEME.background.secondary,
+          borderBottom: `1px solid ${THEME.border.light}`,
+          fontSize: 11,
+          fontWeight: 600,
+          color: THEME.text.tertiary,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+        }}
+      >
+        <div>Status</div>
+        <div>Device Name</div>
+        <div>IMEI</div>
+        <div>Location</div>
+        <div>Last Seen</div>
+        <div>Type</div>
+        <div>Customer</div>
+      </div>
+
+      {/* Device List */}
+      <div style={{ flex: 1, overflow: "auto", background: THEME.background.primary }}>
         {devices.length === 0 ? (
           <div
             style={{
@@ -87,26 +112,154 @@ export function DeviceList({
             </div>
           </div>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-              gap: 16,
-            }}
-          >
-            {devices.map((device) => {
-              const customer = customers.find((c) => c.id === device.customer_id);
-              return (
-                <DeviceCard
-                  key={device.id}
-                  device={device}
-                  customer={customer}
-                  onSelect={() => onDeviceSelect(device)}
-                />
-              );
-            })}
-          </div>
+          devices.map((device) => {
+            const customer = customers.find((c) => c.id === device.customer_id);
+            return (
+              <DeviceListItem
+                key={device.id}
+                device={device}
+                customer={customer}
+                onSelect={() => onDeviceSelect(device)}
+              />
+            );
+          })
         )}
+      </div>
+    </div>
+  );
+}
+
+function DeviceListItem({
+  device,
+  customer,
+  onSelect,
+}: {
+  device: Device;
+  customer?: Customer;
+  onSelect: () => void;
+}) {
+  const isOnline = device.connection_status === "online";
+
+  // Helper function to safely format coordinates
+  const formatCoordinate = (coord: number | string | undefined): string => {
+    if (!coord) return "";
+    const num = typeof coord === "string" ? parseFloat(coord) : coord;
+    return isNaN(num) ? "" : num.toFixed(4);
+  };
+
+  const lat = formatCoordinate(device.last_latitude);
+  const lon = formatCoordinate(device.last_longitude);
+  const hasGPS = lat && lon;
+
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "50px 1fr 200px 150px 150px 120px 100px",
+        gap: 16,
+        padding: "14px 20px",
+        borderBottom: `1px solid ${THEME.border.light}`,
+        cursor: "pointer",
+        transition: "all 0.15s ease",
+        alignItems: "center",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = THEME.background.hover;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {/* Status Indicator */}
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <div
+          style={{
+            width: 12,
+            height: 12,
+            borderRadius: "50%",
+            background: isOnline ? THEME.status.success : THEME.neutral[300],
+            boxShadow: isOnline ? `0 0 12px ${THEME.status.success}` : "none",
+          }}
+          className={isOnline ? "animate-pulse" : ""}
+        />
+      </div>
+
+      {/* Device Name */}
+      <div>
+        <div
+          style={{
+            fontWeight: 600,
+            fontSize: 13,
+            color: THEME.text.primary,
+            marginBottom: 2,
+          }}
+        >
+          {device.device_name || "Unnamed Device"}
+        </div>
+        <div style={{ fontSize: 11, color: THEME.text.tertiary }}>
+          {device.asset_name || "No asset assigned"}
+        </div>
+      </div>
+
+      {/* IMEI */}
+      <div
+        style={{
+          fontSize: 12,
+          color: THEME.text.secondary,
+          fontFamily: "JetBrains Mono, monospace",
+        }}
+      >
+        {device.imei}
+      </div>
+
+      {/* Location */}
+      <div style={{ fontSize: 12, color: THEME.text.secondary }}>
+        {hasGPS ? (
+          <span style={{ color: THEME.primary[600] }}>
+            {lat}, {lon}
+          </span>
+        ) : (
+          <span style={{ color: THEME.text.tertiary }}>No GPS</span>
+        )}
+      </div>
+
+      {/* Last Seen */}
+      <div style={{ fontSize: 12, color: THEME.text.secondary }}>
+        {device.last_location_time ? (
+          <span>{timeAgo(device.last_location_time)}</span>
+        ) : (
+          <span style={{ color: THEME.text.tertiary }}>Never</span>
+        )}
+      </div>
+
+      {/* Device Type */}
+      <div>
+        <span
+          style={{
+            fontSize: 10,
+            padding: "4px 8px",
+            borderRadius: 4,
+            background: THEME.secondary[100],
+            color: THEME.secondary[700],
+            fontWeight: 600,
+          }}
+        >
+          {device.device_type}
+        </span>
+      </div>
+
+      {/* Customer */}
+      <div
+        style={{
+          fontSize: 11,
+          color: THEME.text.tertiary,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {customer?.name || "—"}
       </div>
     </div>
   );

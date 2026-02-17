@@ -1,117 +1,358 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { TelemetryParameter } from "@/types";
 import { Icons } from "@/components/ui/Icons";
-import { formatTimestamp } from "@/lib/utils";
+import { THEME } from "@/lib/theme";
 
 interface TelemetryTabProps {
   telemetry: TelemetryParameter[];
 }
 
 export function TelemetryTab({ telemetry }: TelemetryTabProps) {
+  const [filter, setFilter] = useState<"all" | "system" | "sensor">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Group telemetry by category
+  const systemParams = telemetry.filter((p) => p.type === "system");
+  const sensorParams = telemetry.filter((p) => p.type === "sensor");
+
+  // Filter based on selection
+  let filteredParams = telemetry;
+  if (filter === "system") filteredParams = systemParams;
+  if (filter === "sensor") filteredParams = sensorParams;
+
+  // Search filter
+  if (searchQuery) {
+    filteredParams = filteredParams.filter((p) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.value.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }
+
+  // Group sensors by category
+  const groupedSensors = {
+    position: sensorParams.filter((p) => p.name.startsWith("position.")),
+    gnss: sensorParams.filter((p) => p.name.startsWith("gnss.")),
+    battery: sensorParams.filter((p) => p.name.includes("battery") || p.name.includes("voltage")),
+    io: sensorParams.filter((p) => p.name.startsWith("io.") || p.name.startsWith("ain.") || p.name.startsWith("din.")),
+    engine: sensorParams.filter((p) => p.name.includes("engine") || p.name.includes("ignition")),
+    other: sensorParams.filter((p) =>
+      !p.name.startsWith("position.") &&
+      !p.name.startsWith("gnss.") &&
+      !p.name.includes("battery") &&
+      !p.name.includes("voltage") &&
+      !p.name.startsWith("io.") &&
+      !p.name.startsWith("ain.") &&
+      !p.name.startsWith("din.") &&
+      !p.name.includes("engine") &&
+      !p.name.includes("ignition")
+    ),
+  };
+
   return (
-    <div style={{ padding: 0 }}>
-      {/* Telemetry grid - Flespi style two-column cards */}
+    <div style={{ padding: 24, height: "100%", overflow: "auto" }}>
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: THEME.text.primary, marginBottom: 8 }}>
+          Live Telemetry
+        </div>
+        <div style={{ fontSize: 13, color: THEME.text.secondary }}>
+          Real-time sensor data and system parameters
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <button
+          onClick={() => setFilter("all")}
+          style={{
+            padding: "8px 16px",
+            background: filter === "all" ? THEME.primary[500] : THEME.background.secondary,
+            color: filter === "all" ? "white" : THEME.text.secondary,
+            border: `1px solid ${filter === "all" ? THEME.primary[500] : THEME.border.light}`,
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          All ({telemetry.length})
+        </button>
+        <button
+          onClick={() => setFilter("system")}
+          style={{
+            padding: "8px 16px",
+            background: filter === "system" ? THEME.secondary[500] : THEME.background.secondary,
+            color: filter === "system" ? "white" : THEME.text.secondary,
+            border: `1px solid ${filter === "system" ? THEME.secondary[500] : THEME.border.light}`,
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          System ({systemParams.length})
+        </button>
+        <button
+          onClick={() => setFilter("sensor")}
+          style={{
+            padding: "8px 16px",
+            background: filter === "sensor" ? THEME.accent[500] : THEME.background.secondary,
+            color: filter === "sensor" ? "white" : THEME.text.secondary,
+            border: `1px solid ${filter === "sensor" ? THEME.accent[500] : THEME.border.light}`,
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            transition: "all 0.2s",
+          }}
+        >
+          Sensors ({sensorParams.length})
+        </button>
+
+        {/* Search */}
+        <input
+          type="text"
+          placeholder="Search parameters..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            flex: 1,
+            minWidth: 200,
+            padding: "8px 16px",
+            background: THEME.background.card,
+            border: `1px solid ${THEME.border.light}`,
+            borderRadius: 8,
+            fontSize: 12,
+            color: THEME.text.primary,
+            outline: "none",
+          }}
+        />
+      </div>
+
+      {/* Grouped View */}
+      {filter === "all" || filter === "sensor" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Position */}
+          {groupedSensors.position.length > 0 && (
+            <TelemetryGroup
+              title="📍 Position & Movement"
+              params={groupedSensors.position}
+              color={THEME.primary[500]}
+            />
+          )}
+
+          {/* GNSS */}
+          {groupedSensors.gnss.length > 0 && (
+            <TelemetryGroup
+              title="🛰️ GNSS & Satellites"
+              params={groupedSensors.gnss}
+              color={THEME.secondary[500]}
+            />
+          )}
+
+          {/* Battery & Power */}
+          {groupedSensors.battery.length > 0 && (
+            <TelemetryGroup
+              title="🔋 Power & Battery"
+              params={groupedSensors.battery}
+              color={THEME.accent[600]}
+            />
+          )}
+
+          {/* Engine */}
+          {groupedSensors.engine.length > 0 && (
+            <TelemetryGroup
+              title="🚗 Engine & Ignition"
+              params={groupedSensors.engine}
+              color={THEME.status.info}
+            />
+          )}
+
+          {/* IO */}
+          {groupedSensors.io.length > 0 && (
+            <TelemetryGroup
+              title="⚡ Digital & Analog I/O"
+              params={groupedSensors.io}
+              color={THEME.primary[600]}
+            />
+          )}
+
+          {/* System */}
+          {(filter === "all" && systemParams.length > 0) && (
+            <TelemetryGroup
+              title="⚙️ System Information"
+              params={systemParams}
+              color={THEME.neutral[600]}
+            />
+          )}
+
+          {/* Other */}
+          {groupedSensors.other.length > 0 && (
+            <TelemetryGroup
+              title="📊 Other Sensors"
+              params={groupedSensors.other}
+              color={THEME.neutral[500]}
+            />
+          )}
+        </div>
+      ) : (
+        <TelemetryGroup
+          title="System Parameters"
+          params={filteredParams}
+          color={THEME.secondary[500]}
+        />
+      )}
+
+      {filteredParams.length === 0 && (
+        <div
+          style={{
+            padding: 40,
+            textAlign: "center",
+            color: THEME.text.tertiary,
+            fontSize: 14,
+          }}
+        >
+          No telemetry data available
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TelemetryGroup({
+  title,
+  params,
+  color,
+}: {
+  title: string;
+  params: TelemetryParameter[];
+  color: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  return (
+    <div
+      style={{
+        background: THEME.background.card,
+        border: `1px solid ${THEME.border.light}`,
+        borderRadius: 12,
+        overflow: "hidden",
+        boxShadow: THEME.shadow.sm,
+      }}
+    >
+      {/* Group Header */}
       <div
+        onClick={() => setIsExpanded(!isExpanded)}
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 0,
+          padding: "12px 16px",
+          background: THEME.background.secondary,
+          borderBottom: `2px solid ${color}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          cursor: "pointer",
+          transition: "all 0.2s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = THEME.background.hover;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = THEME.background.secondary;
         }}
       >
-        {telemetry.map((param, idx) => {
-          const isSystem = param.type === "system";
-          return (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: THEME.text.primary }}>
+            {title}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              borderRadius: 4,
+              background: THEME.neutral[200],
+              color: THEME.text.secondary,
+              fontWeight: 600,
+            }}
+          >
+            {params.length}
+          </div>
+        </div>
+        <div
+          style={{
+            transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s",
+            color: THEME.text.tertiary,
+          }}
+        >
+          ▼
+        </div>
+      </div>
+
+      {/* Parameters Grid */}
+      {isExpanded && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+            gap: 1,
+            background: THEME.border.light,
+          }}
+        >
+          {params.map((param) => (
             <div
-              key={param.name}
+              key={param.id}
               style={{
                 padding: "12px 16px",
-                minHeight: 62,
-                background: isSystem ? "#2a2a2a" : "#3a3520",
-                borderBottom: "1px solid rgba(255,255,255,0.06)",
-                borderRight:
-                  idx % 2 === 0 ? "1px solid rgba(255,255,255,0.06)" : "none",
+                background: THEME.background.card,
                 display: "flex",
-                flexDirection: "column",
                 justifyContent: "space-between",
-                position: "relative",
+                alignItems: "center",
+                gap: 12,
               }}
             >
-              {/* Watermark text */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  fontSize: 28,
-                  fontWeight: 800,
-                  color: "rgba(255,255,255,0.04)",
-                  textTransform: "uppercase",
-                  whiteSpace: "nowrap",
-                  pointerEvents: "none",
-                  letterSpacing: 2,
-                }}
-              >
-                {isSystem ? "SYSTEM" : "SENSOR"}
-              </div>
-              {/* Parameter name */}
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: isSystem ? "#a1a1aa" : "#d4d4a8",
-                  position: "relative",
-                  zIndex: 1,
-                }}
-              >
-                {param.name}
-              </div>
-              {/* Value + timestamp + icons */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-end",
-                  justifyContent: "space-between",
-                  position: "relative",
-                  zIndex: 1,
-                }}
-              >
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 15,
-                    fontWeight: 700,
-                    color: isSystem ? "#e2e8f0" : "#fef3c7",
-                    fontFamily: "monospace",
-                    wordBreak: "break-all",
-                    maxWidth: "70%",
+                    fontSize: 11,
+                    color: THEME.text.tertiary,
+                    fontFamily: "JetBrains Mono, monospace",
+                    marginBottom: 4,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {param.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: THEME.text.primary,
+                    fontFamily: "JetBrains Mono, monospace",
                   }}
                 >
                   {param.value}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 9, color: "#525252" }}>
-                    {formatTimestamp(param.timestamp)}
-                  </span>
-                  {!isSystem && (
-                    <span
-                      style={{ color: "#525252", cursor: "pointer", opacity: 0.6 }}
-                    >
-                      <Icons.Chart />
-                    </span>
-                  )}
-                  <span
-                    style={{ color: "#525252", cursor: "pointer", opacity: 0.4 }}
-                  >
-                    <Icons.ThreeDots />
-                  </span>
-                </div>
               </div>
+              <div
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: color,
+                  flexShrink: 0,
+                }}
+                className="animate-pulse"
+              />
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
