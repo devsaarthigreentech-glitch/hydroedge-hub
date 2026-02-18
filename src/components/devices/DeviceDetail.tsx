@@ -196,7 +196,7 @@ export function DeviceDetail({
         {selectedTab === "info" && <InfoTab device={device} customer={customer} />}
         {selectedTab === "edit" && <EditTab device={device} customers={customers} />}
         {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} />}
-        {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}  {/* <<<< ADD THIS */}
+        {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
         {selectedTab === "commands" && (
           <CommandsTab device={device} /> 
         )}

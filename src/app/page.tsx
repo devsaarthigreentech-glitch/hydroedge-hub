@@ -19,6 +19,7 @@ export default function HomePage() {
   const [telemetryData, setTelemetryData] = useState<any[]>([]);
   const [commandHistory, setCommandHistory] = useState<Command[]>([]);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<string | undefined>(undefined);
 
   // Real data from API
   const [devices, setDevices] = useState<Device[]>([]);
@@ -85,6 +86,7 @@ export default function HomePage() {
           
           if (data.success) {
             setTelemetryData(data.data);
+            setLastUpdate(data.lastUpdate);
           }
         } catch (err) {
           console.error('Error fetching telemetry:', err);
@@ -279,6 +281,7 @@ export default function HomePage() {
               telemetry={telemetryData}
               commands={commandHistory}
               onSendCommand={handleSendCommand}
+              lastUpdate={lastUpdate}
             />
           )}
 
