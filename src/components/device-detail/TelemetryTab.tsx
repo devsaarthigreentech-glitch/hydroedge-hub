@@ -1336,7 +1336,7 @@ export function TelemetryTab({ telemetry, lastUpdate }: TelemetryTabProps) {
           {lastUpdate && (
             <div
               style={{
-                background: "white",
+                background: "black",
                 border: `2px solid ${THEME.primary[500]}`,
                 borderRadius: 10,
                 padding: "10px 16px",
