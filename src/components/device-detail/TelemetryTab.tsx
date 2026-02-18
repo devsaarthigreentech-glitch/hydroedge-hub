@@ -1273,6 +1273,7 @@ interface TelemetryTabProps {
 }
 
 export function TelemetryTab({ telemetry, lastUpdate }: TelemetryTabProps) {
+  console.log("🔍 DEBUG - lastUpdate received:", lastUpdate);  // ← ADD THIS LINE
   const [filter, setFilter] = useState<"all" | "system" | "sensor">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
