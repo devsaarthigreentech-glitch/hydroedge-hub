@@ -39,7 +39,6 @@ export async function GET(request: NextRequest) {
         AND latitude IS NOT NULL
         AND longitude IS NOT NULL
       ORDER BY timestamp ASC
-      LIMIT 500
     `;
 
     const result = await query(sql, [deviceId, startTime, endTime]);
