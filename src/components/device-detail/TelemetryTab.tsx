@@ -518,7 +518,7 @@ export function TelemetryTab({ telemetry, lastUpdate }: TelemetryTabProps) {
           </div>
           
           {/* Last Update Badge */}
-          {lastUpdate && (
+          {/* {lastUpdate && (
             <div
               style={{
                 background: "white",
@@ -544,7 +544,7 @@ export function TelemetryTab({ telemetry, lastUpdate }: TelemetryTabProps) {
                 </div>
               </div>
             </div>
-          )}
+          )} */}
         </div>
       </div>
 
