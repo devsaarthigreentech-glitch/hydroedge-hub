@@ -18,6 +18,7 @@ interface DeviceDetailProps {
   customers: Customer[];
   telemetry: any[];
   commands: Command[];
+  lastUpdate? : string;
   onSendCommand: (command: string) => void;
 }
 
@@ -27,6 +28,7 @@ export function DeviceDetail({
   customers,
   telemetry,
   commands,
+  lastUpdate,
   onSendCommand,
 }: DeviceDetailProps) {
   const [selectedTab, setSelectedTab] = useState<DeviceTab>("telemetry");
@@ -193,7 +195,7 @@ export function DeviceDetail({
       <div style={{ flex: 1, overflow: "auto" }}>
         {selectedTab === "info" && <InfoTab device={device} customer={customer} />}
         {selectedTab === "edit" && <EditTab device={device} customers={customers} />}
-        {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} />}
+        {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} />}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}  {/* <<<< ADD THIS */}
         {selectedTab === "commands" && (
           <CommandsTab device={device} /> 

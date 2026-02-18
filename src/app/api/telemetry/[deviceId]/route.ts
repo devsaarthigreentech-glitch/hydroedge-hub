@@ -120,6 +120,7 @@ export async function GET(
       success: true,
       data: telemetryParams,
       device_id: deviceId,
+      lastUpdate : gpsData?.timestamp
     });
   } catch (error: any) {
     console.error('Error fetching telemetry:', error);
