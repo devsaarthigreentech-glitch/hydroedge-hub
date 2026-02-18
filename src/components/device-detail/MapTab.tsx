@@ -1,6 +1,6 @@
 // "use client";
 
-// import React, { useEffect, useRef } from "react";
+// import React, { useEffect, useRef, useState } from "react";
 // import { Device } from "@/types";
 // import { THEME } from "@/lib/theme";
 // import { timeAgo } from "@/lib/utils";
@@ -12,12 +12,61 @@
 // export function MapTab({ device }: MapTabProps) {
 //   const mapRef = useRef<any>(null);
 //   const mapContainerRef = useRef<HTMLDivElement>(null);
+//   const polylineRef = useRef<any>(null);
+  
+//   const [routeHistory, setRouteHistory] = useState<any[]>([]);
+//   const [timeRange, setTimeRange] = useState<"24h" | "today">("24h");
+//   const [showRoute, setShowRoute] = useState(true);
+//   const [loading, setLoading] = useState(false);
 
 //   const hasValidCoordinates = 
 //     device.last_latitude && 
 //     device.last_longitude &&
 //     !isNaN(Number(device.last_latitude)) &&
 //     !isNaN(Number(device.last_longitude));
+
+//   // Fetch route history
+//   useEffect(() => {
+//     if (!device.id || !hasValidCoordinates) return;
+
+//     async function fetchRouteHistory() {
+//       setLoading(true);
+//       try {
+//         // Calculate time range
+//         const now = new Date();
+//         let startTime: Date;
+
+//         if (timeRange === "24h") {
+//           // Last 24 hours
+//           startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+//         } else {
+//           // Since midnight today
+//           startTime = new Date(now);
+//           startTime.setHours(0, 0, 0, 0);
+//         }
+
+//         const response = await fetch(
+//           `/api/route-history?device_id=${device.id}&start_time=${startTime.toISOString()}&end_time=${now.toISOString()}`
+//         );
+        
+//         const data = await response.json();
+        
+//         if (data.success && data.data) {
+//           setRouteHistory(data.data);
+//         }
+//       } catch (error) {
+//         console.error("Error fetching route history:", error);
+//       } finally {
+//         setLoading(false);
+//       }
+//     }
+
+//     fetchRouteHistory();
+    
+//     // Auto-refresh every 2 minutes
+//     const interval = setInterval(fetchRouteHistory, 300000);
+//     return () => clearInterval(interval);
+//   }, [device.id, timeRange, hasValidCoordinates]);
 
 //   useEffect(() => {
 //     if (!hasValidCoordinates || !mapContainerRef.current) return;
@@ -52,7 +101,69 @@
 //         maxZoom: 19,
 //       }).addTo(map);
 
-//       // Custom marker icon based on online status
+//       // Draw route polyline if data exists and showRoute is true
+//       if (showRoute && routeHistory.length > 1) {
+//         // Convert route history to lat/lng pairs with proper typing
+//         const routePoints: [number, number][] = routeHistory.map((point) => [
+//           Number(point.latitude),
+//           Number(point.longitude),
+//         ]);
+
+//         // Remove old polyline if exists
+//         if (polylineRef.current) {
+//           polylineRef.current.remove();
+//         }
+
+//         // Create polyline with gradient effect
+//         const polyline = L.polyline(routePoints, {
+//           color: THEME.primary[500],
+//           weight: 4,
+//           opacity: 0.7,
+//           smoothFactor: 1,
+//         }).addTo(map);
+
+//         polylineRef.current = polyline;
+
+//         // Add start marker (green)
+//         const startPoint = routeHistory[0];
+//         const startIcon = L.divIcon({
+//           className: "route-marker",
+//           html: `
+//             <div style="
+//               width: 24px;
+//               height: 24px;
+//               background: #10b981;
+//               border: 3px solid white;
+//               border-radius: 50%;
+//               box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+//               display: flex;
+//               align-items: center;
+//               justify-content: center;
+//               font-size: 12px;
+//               color: white;
+//               font-weight: bold;
+//             ">S</div>
+//           `,
+//           iconSize: [24, 24],
+//           iconAnchor: [12, 12],
+//         });
+
+//         L.marker([Number(startPoint.latitude), Number(startPoint.longitude)], {
+//           icon: startIcon,
+//         })
+//           .addTo(map)
+//           .bindPopup(`
+//             <div style="font-family: 'JetBrains Mono', monospace;">
+//               <strong>Start Point</strong><br/>
+//               <span style="font-size: 11px;">${timeAgo(startPoint.timestamp)}</span>
+//             </div>
+//           `);
+
+//         // Fit map bounds to show entire route
+//         map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+//       }
+
+//       // Current position marker (end point)
 //       const customIcon = L.divIcon({
 //         className: "custom-marker",
 //         html: `
@@ -91,7 +202,7 @@
 //         iconAnchor: [15, 15],
 //       });
 
-//       // Add marker
+//       // Add current position marker
 //       const marker = L.marker([lat, lon], { icon: customIcon }).addTo(map);
 
 //       // Create popup content
@@ -111,15 +222,15 @@
 //             </span>
 //           </div>
 //           <div style="font-size: 11px; margin-bottom: 4px;">
-//             <strong>Coordinates:</strong><br/>
+//             <strong>Current Position</strong><br/>
 //             <span style="font-family: monospace;">${lat.toFixed(6)}, ${lon.toFixed(6)}</span>
 //           </div>
 //           <div style="font-size: 11px; margin-bottom: 4px;">
 //             <strong>Last Update:</strong> ${device.last_location_time ? timeAgo(device.last_location_time) : "Never"}
 //           </div>
-//           ${device.asset_name ? `
-//             <div style="font-size: 11px;">
-//               <strong>Asset:</strong> ${device.asset_name}
+//           ${routeHistory.length > 1 ? `
+//             <div style="font-size: 11px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+//               <strong>Route:</strong> ${routeHistory.length} points tracked
 //             </div>
 //           ` : ""}
 //         </div>
@@ -131,13 +242,16 @@
 
 //       // Cleanup
 //       return () => {
+//         if (polylineRef.current) {
+//           polylineRef.current.remove();
+//         }
 //         if (mapRef.current) {
 //           mapRef.current.remove();
 //           mapRef.current = null;
 //         }
 //       };
 //     });
-//   }, [device, hasValidCoordinates]);
+//   }, [device, hasValidCoordinates, routeHistory, showRoute]);
 
 //   if (!hasValidCoordinates) {
 //     return (
@@ -182,7 +296,7 @@
 
 //   return (
 //     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: THEME.background.secondary }}>
-//       {/* Map Info Bar */}
+//       {/* Map Controls Bar */}
 //       <div style={{
 //         padding: "12px 20px",
 //         background: "white",
@@ -190,19 +304,77 @@
 //         display: "flex",
 //         alignItems: "center",
 //         justifyContent: "space-between",
+//         flexWrap: "wrap",
+//         gap: 12,
 //       }}>
 //         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
 //           <span style={{ fontSize: 20 }}>📍</span>
 //           <div>
 //             <div style={{ fontSize: 13, fontWeight: 700, color: THEME.text.primary }}>
-//               Device Location
+//               Device Location {routeHistory.length > 1 && `& Route (${routeHistory.length} points)`}
 //             </div>
 //             <div style={{ fontSize: 11, color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace" }}>
 //               {Number(device.last_latitude).toFixed(6)}, {Number(device.last_longitude).toFixed(6)}
 //             </div>
 //           </div>
 //         </div>
-//         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+
+//         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+//           {/* Time Range Selector */}
+//           <div style={{ display: "flex", gap: 6 }}>
+//             <button
+//               onClick={() => setTimeRange("24h")}
+//               style={{
+//                 padding: "6px 12px",
+//                 background: timeRange === "24h" ? THEME.primary[500] : "white",
+//                 color: timeRange === "24h" ? "white" : THEME.text.secondary,
+//                 border: `2px solid ${timeRange === "24h" ? THEME.primary[500] : THEME.border.light}`,
+//                 borderRadius: 8,
+//                 fontSize: 11,
+//                 fontWeight: 700,
+//                 cursor: "pointer",
+//                 transition: "all 0.2s",
+//               }}
+//             >
+//               Last 24h
+//             </button>
+//             <button
+//               onClick={() => setTimeRange("today")}
+//               style={{
+//                 padding: "6px 12px",
+//                 background: timeRange === "today" ? THEME.primary[500] : "white",
+//                 color: timeRange === "today" ? "white" : THEME.text.secondary,
+//                 border: `2px solid ${timeRange === "today" ? THEME.primary[500] : THEME.border.light}`,
+//                 borderRadius: 8,
+//                 fontSize: 11,
+//                 fontWeight: 700,
+//                 cursor: "pointer",
+//                 transition: "all 0.2s",
+//               }}
+//             >
+//               Today
+//             </button>
+//           </div>
+
+//           {/* Show/Hide Route Toggle */}
+//           <button
+//             onClick={() => setShowRoute(!showRoute)}
+//             style={{
+//               padding: "6px 12px",
+//               background: showRoute ? THEME.accent[500] : THEME.neutral[200],
+//               color: showRoute ? "white" : THEME.text.secondary,
+//               border: "none",
+//               borderRadius: 8,
+//               fontSize: 11,
+//               fontWeight: 700,
+//               cursor: "pointer",
+//               transition: "all 0.2s",
+//             }}
+//           >
+//             {showRoute ? "🗺️ Hide Route" : "🗺️ Show Route"}
+//           </button>
+
+//           {/* Status Badge */}
 //           <div style={{
 //             padding: "6px 12px",
 //             background: device.connection_status === "online" ? THEME.primary[50] : THEME.neutral[100],
@@ -214,13 +386,14 @@
 //           }}>
 //             {device.connection_status === "online" ? "🟢 ONLINE" : "⚫ OFFLINE"}
 //           </div>
+
 //           {device.last_location_time && (
 //             <div style={{
 //               fontSize: 11,
 //               color: THEME.text.tertiary,
 //               fontFamily: "JetBrains Mono, monospace",
 //             }}>
-//               Updated {timeAgo(device.last_location_time)}
+//               {loading ? "Updating..." : `Updated ${timeAgo(device.last_location_time)}`}
 //             </div>
 //           )}
 //         </div>
@@ -245,7 +418,7 @@
 //           z-index: 0;
 //         }
 
-//         .custom-marker {
+//         .custom-marker, .route-marker {
 //           background: transparent;
 //           border: none;
 //         }
@@ -519,11 +692,18 @@ export function MapTab({ device }: MapTabProps) {
 
       mapRef.current = map;
 
-      // Cleanup
+      // Cleanup function - CRITICAL for memory management
       return () => {
+        // Remove polyline first
         if (polylineRef.current) {
           polylineRef.current.remove();
+          polylineRef.current = null;
         }
+        // Remove all markers
+        if (marker) {
+          marker.remove();
+        }
+        // Remove map and clear tiles from memory
         if (mapRef.current) {
           mapRef.current.remove();
           mapRef.current = null;

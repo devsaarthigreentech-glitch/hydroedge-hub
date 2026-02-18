@@ -96,7 +96,7 @@ export default function HomePage() {
       fetchTelemetry();
       
       // Auto-refresh telemetry every 5 seconds
-      const interval = setInterval(fetchTelemetry, 5000);
+      const interval = setInterval(fetchTelemetry, 30000);
       return () => clearInterval(interval);
     }
   }, [selectedDevice]);
