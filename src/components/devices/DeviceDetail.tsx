@@ -11,6 +11,7 @@ import { CommandsTab } from "../device-detail/CommandsTab";
 import { LogsTab } from "../device-detail/LogsTab";
 import { SettingsTab } from "../device-detail/SettingsTab";
 import { timeAgo } from "@/lib/utils";
+import { MapTab } from "../device-detail/MapTab";
 
 interface DeviceDetailProps {
   device: Device;
@@ -43,6 +44,7 @@ export function DeviceDetail({
     { key: "commands" as DeviceTab, label: "COMMANDS", icon: Icons.Commands },
     { key: "logs" as DeviceTab, label: "LOGS & MESSAGES", icon: Icons.Logs },
     { key: "settings" as DeviceTab, label: "SETTINGS", icon: Icons.Settings },
+    { key: "map" as DeviceTab, label: "MAP", icon: Icons.MapPin }
   ];
 
   return (
@@ -200,6 +202,7 @@ export function DeviceDetail({
         {selectedTab === "commands" && (
           <CommandsTab device={device} /> 
         )}
+        {selectedTab === "map" && <MapTab device={device} />}
         {selectedTab === "logs" && <LogsTab device={device} />}
         {selectedTab === "settings" && <SettingsTab device={device} />}
       </div>
