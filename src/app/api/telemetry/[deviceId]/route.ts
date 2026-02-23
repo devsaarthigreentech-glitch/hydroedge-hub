@@ -57,7 +57,8 @@ export async function GET(
         timestamp
       FROM io_records
       WHERE device_id = $1
-      ORDER BY timestamp DESC`,
+      ORDER BY timestamp DESC
+      LIMIT 50`,
       [deviceId]
     );
 
