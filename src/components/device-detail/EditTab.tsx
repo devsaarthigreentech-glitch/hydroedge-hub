@@ -128,10 +128,49 @@ export function EditTab({ device, customers }: EditTabProps) {
 
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
 
   const handleSave = async () => {
+    setError("");
+    setSuccess(false);
+    
+    if(!formData.device_name?.trim()){
+      setError("Device name cannot be empty");
+      return;
+    }
+
     setIsSaving(true);
-    // Add your save logic here
+
+    try {
+      const response = await fetch(`/api/devices/${device.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+
+          device_name : formData.device_name
+        }
+        )
+
+      });
+
+      const data = await response.json();
+
+      if(data.success){
+        setSuccess(true);
+      } else {
+        setError(data.error || 'Failed to update device name');
+      }
+      
+    } catch (err) {
+      setError("Network error. Please try again.");
+      console.error("Error updating device:", err);
+    }
+    
+    setIsSaving(false);
+
     setTimeout(() => setIsSaving(false), 1000);
   };
 
