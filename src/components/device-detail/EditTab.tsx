@@ -121,6 +121,7 @@ interface EditTabProps {
 export function EditTab({ device, customers }: EditTabProps) {
   const [formData, setFormData] = useState({
     device_name: device.device_name,
+    device_type: device.device_type,
     asset_name: device.asset_name || "",
     sim_number: device.sim_number || "",
     customer_id: device.customer_id,
@@ -150,7 +151,10 @@ export function EditTab({ device, customers }: EditTabProps) {
         },
         body: JSON.stringify({
 
-          device_name : formData.device_name
+          device_name : formData.device_name,
+          device_type : formData.device_type,
+          asset_name : formData.asset_name,
+          sim_number : formData.sim_number
         }
         )
 
@@ -286,40 +290,54 @@ export function EditTab({ device, customers }: EditTabProps) {
         </div>
 
         {/* Device Type (Read-only) */}
-        <div style={{ marginBottom: 20 }}>
-          <label
-            style={{
-              fontSize: 11,
-              color: THEME.text.tertiary,
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              display: "block",
-              marginBottom: 8,
-              fontWeight: 600,
-            }}
-          >
-            Device Type
-          </label>
-          <input
-            type="text"
-            value={`${device.manufacturer} ${device.device_type}`}
-            disabled
-            style={{
-              width: "100%",
-              background: THEME.neutral[50],
-              border: `2px solid ${THEME.border.light}`,
-              borderRadius: 10,
-              padding: "12px 16px",
-              color: THEME.text.tertiary,
-              fontSize: 14,
-              fontFamily: "inherit",
-              outline: "none",
-              boxSizing: "border-box",
-              cursor: "not-allowed",
-              opacity: 0.7,
-            }}
-          />
-        </div>
+        {/* Device Type (Editable) */}
+<div style={{ marginBottom: 20 }}>
+  <label
+    style={{
+      fontSize: 11,
+      color: THEME.text.tertiary,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      display: "block",
+      marginBottom: 8,
+      fontWeight: 600,
+    }}
+  >
+    Device Type
+  </label>
+  <select
+    value={formData.device_type || device.device_type}
+    onChange={(e) => setFormData({ ...formData, device_type: e.target.value })}
+    style={{
+      width: "100%",
+      background: "white",
+      border: `2px solid ${THEME.border.light}`,
+      borderRadius: 10,
+      padding: "12px 16px",
+      color: THEME.text.primary,
+      fontSize: 14,
+      fontFamily: "inherit",
+      outline: "none",
+      boxSizing: "border-box",
+      cursor: "pointer",
+      transition: "all 0.2s",
+      boxShadow: THEME.shadow.sm,
+    }}
+    onFocus={(e) => {
+      e.currentTarget.style.borderColor = THEME.primary[500];
+      e.currentTarget.style.boxShadow = `0 0 0 3px ${THEME.primary[100]}`;
+    }}
+    onBlur={(e) => {
+      e.currentTarget.style.borderColor = THEME.border.light;
+      e.currentTarget.style.boxShadow = THEME.shadow.sm;
+    }}
+  >
+    <option value="FMB150">FMB150</option>
+    <option value="FMC650">FMC650</option>
+    <option value="FMB920">FMB920</option>
+    <option value="FMB140">FMB140</option>
+  </select>
+</div>
 
         {/* Asset Name */}
         <div style={{ marginBottom: 20 }}>
@@ -529,6 +547,56 @@ export function EditTab({ device, customers }: EditTabProps) {
           </button>
         </div>
       </div>
+
+      {/* Success Message */}
+{success && (
+  <div style={{
+    position: "fixed",
+    top: 20,
+    right: 20,
+    padding: 16,
+    background: "#d1fae5",
+    border: "2px solid #10b981",
+    borderRadius: 12,
+    color: "#047857",
+    fontSize: 14,
+    fontWeight: 600,
+    boxShadow: THEME.shadow.lg,
+    zIndex: 999,
+    maxWidth: 400,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  }}>
+    <span style={{ fontSize: 20 }}>✅</span>
+    <span>Device updated successfully!</span>
+  </div>
+)}
+
+{/* Error Message */}
+{error && (
+  <div style={{
+    position: "fixed",
+    top: 20,
+    right: 20,
+    padding: 16,
+    background: "#fee",
+    border: "2px solid #ef4444",
+    borderRadius: 12,
+    color: "#dc2626",
+    fontSize: 14,
+    fontWeight: 600,
+    boxShadow: THEME.shadow.lg,
+    zIndex: 999,
+    maxWidth: 400,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+  }}>
+    <span style={{ fontSize: 20 }}>⚠️</span>
+    <span>{error}</span>
+  </div>
+)}
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
