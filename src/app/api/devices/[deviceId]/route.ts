@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { param } from "framer-motion/client";
 
 export async function PATCH(
     request: NextRequest,
@@ -9,7 +10,50 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name } = body;
+        const { device_name, device_type, asset_name, sim_number } = body;
+
+        const updates = [];
+        const values = [];
+        let paramCount = 1;
+
+        if(device_name !== undefined){
+            updates.push(`device_name = $${paramCount}`);
+            values.push(device_name);
+            paramCount++;
+        }
+
+        if(device_type !== undefined){
+            updates.push(`device_type = $${paramCount}`);
+            values.push(device_type);
+            paramCount++;
+        }
+
+        if (asset_name !== undefined) {
+            updates.push(`asset_name = $${paramCount}`);
+            values.push(asset_name);
+            paramCount++;
+          }
+
+        if(sim_number !== undefined){
+            updates.push(`sim_number = $${paramCount}`);
+            values.push(sim_number);
+            paramCount++;
+        }
+
+        if(updates.length === 0){
+            return NextResponse.json(
+                {
+                    success : false, error : 'No fields to update'
+                }, 
+                {
+                    status: 400
+                }
+            );
+        }
+
+        updates.push(`updated_at = NOW()`);
+
+        values.push(deviceId);
 
         if(!device_name){
             return NextResponse.json(
@@ -25,15 +69,19 @@ export async function PATCH(
             );
         }
 
-        const result = await query(
+
+
+        const sql = 
             `
-            UPDATE devices
-            SET device_name = $1, updated_at = now()
-            where id = $2 and deleted_at IS NULL
-            RETURNING *
-            `,
-            [device_name, deviceId]
-        );
+                UPDATE devices
+                SET ${updates.join(', ')}
+                WHERE id = $${paramCount}
+                AND deleted_at IS NULL
+                RETURNING *
+            `;
+
+            
+        const result = await query(sql,values);
 
         if(result.rows.length === 0){
             return NextResponse.json(
