@@ -16,6 +16,22 @@ export async function PATCH(
         const values = [];
         let paramCount = 1;
 
+        if (device_name !== undefined) {  // ← Only validate if it's being updated
+            if (!device_name.trim()) {
+                return NextResponse.json(
+                    { success: false, error: 'Device name cannot be empty' },
+                    { status: 400 }
+                );
+            }
+            
+            if (device_name.length > 100) {
+                return NextResponse.json(
+                    { success: false, error: 'Device name is too long (max 100 characters)' },
+                    { status: 400 }
+                );
+            }
+        }
+
         if(device_name !== undefined){
             updates.push(`device_name = $${paramCount}`);
             values.push(device_name);
@@ -52,24 +68,7 @@ export async function PATCH(
         }
 
         updates.push(`updated_at = NOW()`);
-
         values.push(deviceId);
-
-        if(!device_name){
-            return NextResponse.json(
-                {success : false, error : 'device_name is required'},
-                {status : 400}
-            );
-        }
-
-        if(device_name.length > 100){
-            return NextResponse.json(
-                {success : false, error : 'device_name is too long, max 100 characters allowed'},
-                {status : 400}
-            );
-        }
-
-
 
         const sql = 
             `
@@ -80,7 +79,7 @@ export async function PATCH(
                 RETURNING *
             `;
 
-            
+
         const result = await query(sql,values);
 
         if(result.rows.length === 0){

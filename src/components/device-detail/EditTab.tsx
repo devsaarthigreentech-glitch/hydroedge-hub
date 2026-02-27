@@ -445,7 +445,7 @@ export function EditTab({ device, customers }: EditTabProps) {
             Assigned Customer
           </label>
           <select
-            value={formData.customer_id}
+            value={formData.customer_id || ""}
             onChange={(e) => setFormData({ ...formData, customer_id: e.target.value })}
             style={{
               width: "100%",
