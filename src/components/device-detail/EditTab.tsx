@@ -132,52 +132,105 @@ export function EditTab({ device, customers }: EditTabProps) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+  // const handleSave = async () => {
+  //   setError("");
+  //   setSuccess(false);
+    
+  //   if(!formData.device_name?.trim()){
+  //     setError("Device name cannot be empty");
+  //     return;
+  //   }
+
+  //   setIsSaving(true);
+
+  //   try {
+  //     const response = await fetch(`/api/devices/${device.id}`, {
+  //       method: 'PATCH',
+  //       headers: {
+  //         'Content-Type': 'application/json'
+  //       },
+  //       body: JSON.stringify({
+
+  //         device_name : formData.device_name,
+  //         device_type : formData.device_type,
+  //         asset_name : formData.asset_name,
+  //         sim_number : formData.sim_number
+  //       }
+  //       )
+
+  //     });
+
+  //     const data = await response.json();
+
+  //     if(data.success){
+  //       setSuccess(true);
+  //     } else {
+  //       setError(data.error || 'Failed to update device name');
+  //     }
+      
+  //   } catch (err) {
+  //     setError("Network error. Please try again.");
+  //     console.error("Error updating device:", err);
+  //   }
+    
+  //   setIsSaving(false);
+  // };
+
   const handleSave = async () => {
     setError("");
     setSuccess(false);
     
-    if(!formData.device_name?.trim()){
+    if (!formData.device_name?.trim()) {
       setError("Device name cannot be empty");
       return;
     }
-
+  
     setIsSaving(true);
-
+  
     try {
+      console.log("📤 Sending update request...");
+      
       const response = await fetch(`/api/devices/${device.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-
-          device_name : formData.device_name,
-          device_type : formData.device_type,
-          asset_name : formData.asset_name,
-          sim_number : formData.sim_number
-        }
-        )
-
+          device_name: formData.device_name,
+          device_type: formData.device_type,
+          asset_name: formData.asset_name,
+          sim_number: formData.sim_number,
+        })
       });
-
-      const data = await response.json();
-
-      if(data.success){
-        setSuccess(true);
-      } else {
-        setError(data.error || 'Failed to update device name');
-      }
+  
+      console.log("📥 Response status:", response.status);
       
-    } catch (err) {
+      // Parse response
+      const data = await response.json();
+      console.log("📥 Response data:", data);
+  
+      // Check if request was successful
+      if (response.ok && data.success) {
+        setSuccess(true);
+        console.log("✅ Update successful!");
+        
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => setSuccess(false), 3000);
+      } else {
+        // Show error from API
+        const errorMessage = data.error || 'Failed to update device';
+        setError(errorMessage);
+        console.error("❌ Update failed:", errorMessage);
+      }
+  
+    } catch (err: any) {
+      console.error("❌ Network error:", err);
       setError("Network error. Please try again.");
-      console.error("Error updating device:", err);
+    } finally {
+      setIsSaving(false);
     }
-    
-    setIsSaving(false);
-
-    setTimeout(() => setIsSaving(false), 1000);
   };
-
+  
   const handleDelete = async () => {
     // Add your delete logic here
     console.log("Delete device:", device.id);
