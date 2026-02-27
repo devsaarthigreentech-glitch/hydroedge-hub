@@ -90,7 +90,7 @@ export async function PATCH(
         }
 
         return NextResponse.json({
-            sucess: true,
+            success: true,
             message : 'Device Name updated sucessfully',
             data: result.rows[0]
         });
