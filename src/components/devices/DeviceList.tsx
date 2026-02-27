@@ -82,7 +82,6 @@ export function DeviceList({
         <div>Status</div>
         <div>Device Name</div>
         <div>IMEI</div>
-        <div>Location</div>
         <div>Last Seen</div>
         <div>Type</div>
         <div>Customer</div>
@@ -214,7 +213,7 @@ function DeviceListItem({
       </div>
 
       {/* Location */}
-      <div style={{ fontSize: 12, color: THEME.text.secondary }}>
+      {/* <div style={{ fontSize: 12, color: THEME.text.secondary }}>
         {hasGPS ? (
           <span style={{ color: THEME.primary[600] }}>
             {lat}, {lon}
@@ -222,7 +221,7 @@ function DeviceListItem({
         ) : (
           <span style={{ color: THEME.text.tertiary }}>No GPS</span>
         )}
-      </div>
+      </div> */}
 
       {/* Last Seen */}
       <div style={{ fontSize: 12, color: THEME.text.secondary }}>
