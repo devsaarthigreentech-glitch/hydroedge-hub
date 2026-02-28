@@ -302,6 +302,9 @@ export default function HomePage() {
         isOpen={showCustomerModal}
         onClose={() => setShowCustomerModal(false)}
         customers={customers}
+        onCustomerCreated={(newCustomer) => {
+          setCustomers(prev => [...prev, newCustomer]);
+        }}
       />
     </div>
   );
