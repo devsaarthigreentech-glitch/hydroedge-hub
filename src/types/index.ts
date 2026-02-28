@@ -49,14 +49,25 @@ export interface Device {
   updated_at?: string;
 }
 
+// export interface TelemetryParameter {
+//   id: number;
+//   name: string;
+//   value: string;
+//   type: TelemetryType;
+//   timestamp: string;
+// }
+// In @/types
 export interface TelemetryParameter {
-  id: number;
+  id: number | string;
   name: string;
   value: string;
-  type: TelemetryType;
-  timestamp: string;
+  raw_value?: string;    // ← add
+  unit?: string;
+  type: "system" | "sensor";
+  category?: string;     // ← add
+  timestamp?: string;
+  io_id?: number;        // ← add
 }
-
 export interface Command {
   id: number | string;
   command: string;

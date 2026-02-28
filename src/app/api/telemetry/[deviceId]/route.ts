@@ -511,6 +511,7 @@ export async function GET(
         category:  mapping?.category || "unknown",
         timestamp: io.timestamp,
         io_id:     ioId,
+        type:      "sensor",
       });
     }
 
