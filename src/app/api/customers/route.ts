@@ -123,14 +123,58 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";  // named export, not pool
 
+// export async function GET() {
+//   const result = await query(`
+//     SELECT * FROM customers
+//     WHERE deleted_at IS NULL
+//     ORDER BY hierarchy_level ASC, name ASC
+//   `);
+//   return NextResponse.json(result.rows);
+// }
+
 export async function GET() {
-  const result = await query(`
-    SELECT * FROM customers
-    WHERE deleted_at IS NULL
-    ORDER BY hierarchy_level ASC, name ASC
-  `);
-  return NextResponse.json(result.rows);
-}
+    try {
+      const sql = `
+        SELECT 
+          id,
+          name,
+          email,
+          phone,
+          company_name,
+          customer_type,
+          status,
+          parent_customer_id,
+          hierarchy_level,
+          max_devices,
+          city,
+          state,
+          country,
+          created_at,
+          updated_at
+        FROM customers
+        WHERE deleted_at IS NULL
+        ORDER BY hierarchy_level, name
+      `;
+  
+      const result = await query(sql);
+  
+      return NextResponse.json({
+        success: true,
+        data: result.rows,
+        count: result.rowCount,
+      });
+    } catch (error: any) {
+      console.error('Error fetching customers:', error);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Failed to fetch customers',
+          message: error.message,
+        },
+        { status: 500 }
+      );
+    }
+  }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
