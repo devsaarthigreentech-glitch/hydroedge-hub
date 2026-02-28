@@ -121,10 +121,10 @@
 // }
 
 import { NextRequest, NextResponse } from "next/server";
-import  pool  from "@/lib/db";
+import { query } from "@/lib/db";  // named export, not pool
 
 export async function GET() {
-  const result = await pool.query(`
+  const result = await query(`
     SELECT * FROM customers
     WHERE deleted_at IS NULL
     ORDER BY hierarchy_level ASC, name ASC
@@ -136,31 +136,15 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
 
   const {
-    name,
-    email,
-    phone,
-    company_name,
-    parent_customer_id,
-    customer_type,
-    primary_location,
-    timezone,
-    plan_type,
-    max_devices,
-    max_users,
-    max_api_calls_per_day,
-    contact_person_name,
-    contact_person_email,
-    contact_person_phone,
-    address_line1,
-    address_line2,
-    city,
-    state,
-    country,
-    postal_code,
+    name, email, phone, company_name,
+    parent_customer_id, customer_type,
+    primary_location, timezone, plan_type,
+    max_devices, max_users, max_api_calls_per_day,
+    contact_person_name, contact_person_email, contact_person_phone,
+    address_line1, address_line2, city, state, country, postal_code,
     notes,
   } = body;
 
-  // Required field validation
   if (!name?.trim() || !email?.trim()) {
     return NextResponse.json(
       { error: "Name and email are required" },
@@ -169,7 +153,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await pool.query(
+    const result = await query(
       `INSERT INTO customers (
         name, email, phone, company_name,
         parent_customer_id, customer_type,
@@ -186,14 +170,13 @@ export async function POST(req: NextRequest) {
         $13, $14, $15,
         $16, $17, $18, $19, $20, $21,
         $22
-      )
-      RETURNING *`,
+      ) RETURNING *`,
       [
         name.trim(),
         email.trim().toLowerCase(),
         phone || null,
         company_name || null,
-        parent_customer_id || null,        // null = root customer
+        parent_customer_id || null,
         customer_type || "customer",
         primary_location || null,
         timezone || "Asia/Kolkata",
@@ -217,14 +200,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result.rows[0], { status: 201 });
 
   } catch (err: any) {
-    // Unique constraint violation on email
     if (err.code === "23505" && err.constraint === "customers_email_key") {
       return NextResponse.json(
         { error: "A customer with this email already exists" },
         { status: 409 }
       );
     }
-    // Foreign key violation — invalid parent_customer_id
     if (err.code === "23503") {
       return NextResponse.json(
         { error: "Parent customer not found" },
