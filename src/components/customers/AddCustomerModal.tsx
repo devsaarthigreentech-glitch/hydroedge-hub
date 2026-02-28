@@ -267,6 +267,35 @@ export function AddCustomerModal({
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setFormData((prev) => ({ ...prev, [key]: e.target.value }));
 
+  // const handleSubmit = async () => {
+  //   if (!formData.name.trim() || !formData.email.trim()) {
+  //     setError("Customer name and email are required.");
+  //     return;
+  //   }
+  //   setLoading(true);
+  //   setError("");
+  //   try {
+  //     const res = await fetch("/api/customers", {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify({
+  //         ...formData,
+  //         parent_customer_id: formData.parent_customer_id || null,
+  //       }),
+  //     });
+  //     const data = await res.json();
+  //     if (!res.ok) {
+  //       setError(data.error || "Failed to create customer");
+  //       return;
+  //     }
+  //     onCustomerCreated(data);
+  //     handleClose();
+  //   } catch {
+  //     setError("Network error — please try again.");
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.email.trim()) {
       setError("Customer name and email are required.");
@@ -283,15 +312,29 @@ export function AddCustomerModal({
           parent_customer_id: formData.parent_customer_id || null,
         }),
       });
-      const data = await res.json();
+  
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        // Response wasn't valid JSON
+        setError(`Server returned status ${res.status} with no valid JSON body`);
+        return;
+      }
+  
       if (!res.ok) {
         setError(data.error || "Failed to create customer");
         return;
       }
+  
+      // Success
       onCustomerCreated(data);
       handleClose();
-    } catch {
-      setError("Network error — please try again.");
+  
+    } catch (err: any) {
+      // Only true network failures reach here (no connection, CORS, etc.)
+      console.error("Network error:", err);
+      setError("Network error — could not reach the server.");
     } finally {
       setLoading(false);
     }
