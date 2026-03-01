@@ -27,6 +27,16 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const handleDeviceDeleted = () => {
+    setDevices(prev => prev.filter(d => d.id !== selectedDevice?.id));
+    setSelectedDevice(null);
+  };
+  
+  const handleDeviceUpdated = (updatedDevice: Device) => {
+    setDevices(prev => prev.map(d => d.id === updatedDevice.id ? { ...d, ...updatedDevice } : d));
+    setSelectedDevice(prev => prev ? { ...prev, ...updatedDevice } : null);
+  };
+
   // Fetch customers from database
   useEffect(() => {
     async function fetchCustomers() {
@@ -282,6 +292,8 @@ export default function HomePage() {
               commands={commandHistory}
               onSendCommand={handleSendCommand}
               lastUpdate={lastUpdate}
+              onDeviceDeleted={handleDeviceDeleted}   // ← ADD
+              onDeviceUpdated={handleDeviceUpdated}
             />
           )}
 

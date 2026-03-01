@@ -21,6 +21,8 @@ interface DeviceDetailProps {
   commands: Command[];
   lastUpdate? : string;
   onSendCommand: (command: string) => void;
+  onDeviceDeleted:  () => void,
+  onDeviceUpdated: (device: Device) => void
 }
 
 export function DeviceDetail({
@@ -31,6 +33,9 @@ export function DeviceDetail({
   commands,
   lastUpdate,
   onSendCommand,
+  onDeviceDeleted,
+  onDeviceUpdated
+
 }: DeviceDetailProps) {
   const [selectedTab, setSelectedTab] = useState<DeviceTab>("telemetry");
 
@@ -196,7 +201,15 @@ export function DeviceDetail({
       {/* Tab content */}
       <div style={{ flex: 1, overflow: "auto" }}>
         {selectedTab === "info" && <InfoTab device={device} customer={customer} />}
-        {selectedTab === "edit" && <EditTab device={device} customers={customers} />}
+        {selectedTab === "edit" && <EditTab device={device} customers={customers} onSaved={(updatedDevice) => {
+          onDeviceUpdated?.(updatedDevice);
+        }} 
+        onDeleted={() => {
+          onClose(); // close the detail panel
+          // Parent should refresh device list
+          onDeviceDeleted?.();
+        }}
+        />}
         {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} />}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
         {selectedTab === "commands" && (
