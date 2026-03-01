@@ -116,21 +116,25 @@ import { THEME } from "@/lib/theme";
 interface EditTabProps {
   device: Device;
   customers: Customer[];
+  onSaved?: (updatedDevice: Device) => void;  // callback to refresh parent
+  onDeleted?: () => void; 
 }
 
-export function EditTab({ device, customers }: EditTabProps) {
+export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps) {
   const [formData, setFormData] = useState({
     device_name: device.device_name,
     device_type: device.device_type,
     asset_name: device.asset_name || "",
     sim_number: device.sim_number || "",
-    customer_id: device.customer_id,
+    customer_id: device.customer_id || "",
   });
 
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // const handleSave = async () => {
   //   setError("");
@@ -200,6 +204,7 @@ export function EditTab({ device, customers }: EditTabProps) {
           device_type: formData.device_type,
           asset_name: formData.asset_name,
           sim_number: formData.sim_number,
+          customer_id: formData.customer_id
         })
       });
   
@@ -213,6 +218,7 @@ export function EditTab({ device, customers }: EditTabProps) {
       if (response.ok && data.success) {
         setSuccess(true);
         console.log("✅ Update successful!");
+        onSaved?.(data.device);
         
         // Auto-hide success message after 3 seconds
         setTimeout(() => setSuccess(false), 3000);
@@ -232,8 +238,21 @@ export function EditTab({ device, customers }: EditTabProps) {
   };
   
   const handleDelete = async () => {
-    // Add your delete logic here
-    console.log("Delete device:", device.id);
+    if (!confirmDelete) {
+      setShowDeleteConfirm(true); // first click: show confirmation
+      return;
+    }
+    setShowDeleteConfirm(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/devices/${device.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete");
+      onDeleted?.(); // close the panel
+    } catch (err: unknown) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Delete failed" });
+      setShowDeleteConfirm(false);
+    }
   };
 
   return (
