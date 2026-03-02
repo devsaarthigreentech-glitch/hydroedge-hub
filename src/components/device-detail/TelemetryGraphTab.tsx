@@ -225,7 +225,13 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
           <div>
             <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Average</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: "#e0e0e0" }}>
-              {(values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)} {metric.unit}
+              {/* {(values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)} {metric.unit} */}
+              {(() => {
+  const nonZero = values.filter(v => v !== 0);
+  return nonZero.length > 0 
+    ? (nonZero.reduce((a, b) => a + b, 0) / nonZero.length).toFixed(2)
+    : "0.00";
+})()} {metric.unit}
             </div>
           </div>
           <div>
