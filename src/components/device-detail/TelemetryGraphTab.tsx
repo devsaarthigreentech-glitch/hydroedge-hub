@@ -24,15 +24,26 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
   const [loading, setLoading] = useState(true);
 
   // Available metrics to graph
+  // const metrics = [
+  //   { key: "position.speed", label: "Speed", unit: "km/h", color: "#00c853" },
+  //   { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3" },
+  //   { key: "position.longitude", label: "Longitude", unit: "°", color: "#ff9800" },
+  //   { key: "position.altitude", label: "Altitude", unit: "m", color: "#9c27b0" },
+  //   { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336" },
+  //   { key: "external.powersource.voltage", label: "External Voltage", unit: "V", color: "#4caf50" },
+  //   { key: "battery.voltage", label: "Battery Voltage", unit: "V", color: "#ffeb3b" },
+  //   { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4" },
+  // ];
+
   const metrics = [
-    { key: "position.speed", label: "Speed", unit: "km/h", color: "#00c853" },
-    { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3" },
-    { key: "position.longitude", label: "Longitude", unit: "°", color: "#ff9800" },
-    { key: "position.altitude", label: "Altitude", unit: "m", color: "#9c27b0" },
-    { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336" },
-    { key: "external.powersource.voltage", label: "External Voltage", unit: "V", color: "#4caf50" },
-    { key: "battery.voltage", label: "Battery Voltage", unit: "V", color: "#ffeb3b" },
-    { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4" },
+    { key: "position.speed", label: "Speed", unit: "km/h", color: "#00c853", transform: (v: number) => v },
+    { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3", transform: (v: number) => v / 10000000 },
+    { key: "position.longitude", label: "Longitude", unit: "°", color: "#ff9800", transform: (v: number) => v / 10000000 },
+    { key: "position.altitude", label: "Altitude", unit: "m", color: "#9c27b0", transform: (v: number) => v },
+    { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336", transform: (v: number) => v },
+    { key: "external.powersource.voltage", label: "External Voltage", unit: "V", color: "#4caf50", transform: (v: number) => v / 1000 },
+    { key: "battery.voltage", label: "Battery Voltage", unit: "V", color: "#ffeb3b", transform: (v: number) => v / 1000 },
+    { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4", transform: (v: number) => v },
   ];
 
   useEffect(() => {
@@ -59,10 +70,13 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
     }
   };
 
+  
   const renderGraph = () => {
     const metric = metrics.find((m) => m.key === selectedMetric);
     if (!metric) return null;
 
+    const transform = metric || ((v: number) => v);
+    
     const dataPoints = telemetryHistory[selectedMetric] || [];
     
     if (dataPoints.length === 0) {
@@ -79,9 +93,12 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
         </div>
       );
     }
+    const transformFn = (metric?.transform ?? ((v: number) => v)) as (v: number) => number;
 
     // Calculate min/max for scaling
-    const values = dataPoints.map((d) => d.value);
+    // const values = dataPoints.map((d) => d.value);
+    const values = dataPoints.map((d) => transformFn(d.value));
+    
     const minValue = Math.min(...values);
     const maxValue = Math.max(...values);
     const range = maxValue - minValue || 1;
@@ -164,11 +181,16 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
                 fill={metric.color}
                 style={{ cursor: "pointer" }}
               >
-                <title>
+                {/* <title>
                   {new Date(point.timestamp).toLocaleString()}
                   {"\n"}
                   {point.value.toFixed(2)} {metric.unit}
-                </title>
+                </title> */}
+                <title>
+  {new Date(point.timestamp).toLocaleString()}
+  {"\n"}
+  {transformFn(point.value).toFixed(2)} {metric.unit}
+</title>
               </circle>
             );
           })}
@@ -219,7 +241,8 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
           <div>
             <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 4 }}>Current</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: metric.color }}>
-              {dataPoints[dataPoints.length - 1]?.value.toFixed(2)} {metric.unit}
+              {/* {dataPoints[dataPoints.length - 1]?.value.toFixed(2)} {metric.unit} */}
+              {transformFn(dataPoints[dataPoints.length - 1]?.value).toFixed(2)} {metric.unit}
             </div>
           </div>
           <div>
