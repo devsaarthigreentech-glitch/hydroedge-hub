@@ -26,7 +26,7 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   const [dailyData, setDailyData] = useState<DailyData[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(1);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,7 +94,7 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
 
         {/* Day range selector */}
         <div style={{ display: "flex", gap: 6 }}>
-          {[7, 14, 30].map((d) => (
+          {[1, 7, 14].map((d) => (
             <button key={d} onClick={() => setDays(d)} style={{
               padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600,
               cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s",

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       FROM io_records
       WHERE device_id = $1
         AND io_id = 105
-        AND recorded_at >= NOW() - INTERVAL '${days} days'
+        AND recorded_at >= NOW() - ($2 * INTERVAL '1 day')
         AND value::numeric > 0
       GROUP BY DATE(recorded_at AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       FROM io_records
       WHERE device_id = $1
         AND io_id IN (392, 405)
-        AND recorded_at >= NOW() - INTERVAL '${days} days'
+        AND recorded_at >= NOW() - ($2 * INTERVAL '1 day')
         AND value::numeric > 0
       GROUP BY DATE(recorded_at AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
@@ -99,6 +99,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Analytics API error:", error);
-    return NextResponse.json({ error: "Failed to fetch analytics" }, { status: 500 });
+    return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
