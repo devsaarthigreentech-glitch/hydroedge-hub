@@ -4,7 +4,7 @@ import { query } from "@/lib/db";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const device_id = searchParams.get("device_id");
-  const days = parseInt(searchParams.get("days") || "7");
+  const days = parseInt(searchParams.get("days") || "1");
 
   if (!device_id) {
     return NextResponse.json({ error: "device_id required" }, { status: 400 });
@@ -18,10 +18,10 @@ export async function GET(request: NextRequest) {
         DATE(timestamp AT TIME ZONE 'Asia/Kolkata') as day,
         MAX(io_value::numeric) as max_mileage,
         MIN(io_value::numeric) as min_mileage,
-        MAX(io_value::numeric) - MIN(io_value::numeric) as daily_distance
+        MAX(io_value::numeric) - MIN(io_value::numeric) as daily_distance_meters
       FROM io_records
       WHERE device_id = $1
-        AND io_id = 105
+        AND io_id = 16
         AND timestamp >= NOW() - ($2 * INTERVAL '1 day')
         AND io_value::numeric > 0
       GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
         ROUND((MAX(io_value::numeric) - MIN(io_value::numeric)) * 0.1, 2) as daily_fuel
       FROM io_records
       WHERE device_id = $1
-        AND io_id IN (392, 405)
+        AND io_id = 107
         AND timestamp >= NOW() - ($2 * INTERVAL '1 day')
         AND io_value::numeric > 0
       GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
@@ -67,7 +67,8 @@ export async function GET(request: NextRequest) {
       .map((day) => {
         const mileage = mileageMap.get(day);
         const fuel = fuelMap.get(day);
-        const distance = parseFloat(mileage?.daily_distance || 0);
+        const distanceMeters = parseFloat(mileage?.daily_distance_meters || 0);
+        const distance = parseFloat((distanceMeters / 1000).toFixed(2));
         const fuelConsumed = parseFloat(fuel?.daily_fuel || 0);
         // Fuel average = km per litre
         const fuelAverage =
