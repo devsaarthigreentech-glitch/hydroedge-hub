@@ -15,16 +15,16 @@ export async function GET(request: NextRequest) {
     // We take MAX - MIN per day to get distance travelled that day
     const mileageQuery = `
       SELECT 
-        DATE(recorded_at AT TIME ZONE 'Asia/Kolkata') as day,
+        DATE(timestamp AT TIME ZONE 'Asia/Kolkata') as day,
         MAX(value::numeric) as max_mileage,
         MIN(value::numeric) as min_mileage,
         MAX(value::numeric) - MIN(value::numeric) as daily_distance
       FROM io_records
       WHERE device_id = $1
         AND io_id = 105
-        AND recorded_at >= NOW() - ($2 * INTERVAL '1 day')
+        AND timestamp >= NOW() - ($2 * INTERVAL '1 day')
         AND value::numeric > 0
-      GROUP BY DATE(recorded_at AT TIME ZONE 'Asia/Kolkata')
+      GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
     `;
 
@@ -32,23 +32,23 @@ export async function GET(request: NextRequest) {
     // Also cumulative, so MAX - MIN per day
     const fuelQuery = `
       SELECT 
-        DATE(recorded_at AT TIME ZONE 'Asia/Kolkata') as day,
+        DATE(timestamp AT TIME ZONE 'Asia/Kolkata') as day,
         MAX(value::numeric) as max_fuel,
         MIN(value::numeric) as min_fuel,
         ROUND((MAX(value::numeric) - MIN(value::numeric)) * 0.1, 2) as daily_fuel
       FROM io_records
       WHERE device_id = $1
         AND io_id IN (392, 405)
-        AND recorded_at >= NOW() - ($2 * INTERVAL '1 day')
+        AND timestamp >= NOW() - ($2 * INTERVAL '1 day')
         AND value::numeric > 0
-      GROUP BY DATE(recorded_at AT TIME ZONE 'Asia/Kolkata')
+      GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
     `;
 
     const [mileageResult, fuelResult] = await Promise.all([
-      query(mileageQuery, [device_id]),
-      query(fuelQuery, [device_id]),
-    ]);
+        query(mileageQuery, [device_id, days]),
+        query(fuelQuery, [device_id, days]),
+      ]);
 
     // Merge by day and calculate fuel average
     const mileageMap = new Map(
