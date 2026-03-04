@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
 
         return {
           day,
-          distance_km: parseFloat(distance.toFixed(2)),
+          distance_km: distance,
           fuel_litres: fuelConsumed,
           fuel_average_kmpl: fuelAverage, // km per litre
         };
