@@ -16,14 +16,14 @@ export async function GET(request: NextRequest) {
     const mileageQuery = `
       SELECT 
         DATE(timestamp AT TIME ZONE 'Asia/Kolkata') as day,
-        MAX(value::numeric) as max_mileage,
-        MIN(value::numeric) as min_mileage,
-        MAX(value::numeric) - MIN(value::numeric) as daily_distance
+        MAX(io_value::numeric) as max_mileage,
+        MIN(io_value::numeric) as min_mileage,
+        MAX(io_value::numeric) - MIN(io_value::numeric) as daily_distance
       FROM io_records
       WHERE device_id = $1
         AND io_id = 105
         AND timestamp >= NOW() - ($2 * INTERVAL '1 day')
-        AND value::numeric > 0
+        AND io_value::numeric > 0
       GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
     `;
@@ -33,14 +33,14 @@ export async function GET(request: NextRequest) {
     const fuelQuery = `
       SELECT 
         DATE(timestamp AT TIME ZONE 'Asia/Kolkata') as day,
-        MAX(value::numeric) as max_fuel,
-        MIN(value::numeric) as min_fuel,
-        ROUND((MAX(value::numeric) - MIN(value::numeric)) * 0.1, 2) as daily_fuel
+        MAX(io_value::numeric) as max_fuel,
+        MIN(io_value::numeric) as min_fuel,
+        ROUND((MAX(io_value::numeric) - MIN(io_value::numeric)) * 0.1, 2) as daily_fuel
       FROM io_records
       WHERE device_id = $1
         AND io_id IN (392, 405)
         AND timestamp >= NOW() - ($2 * INTERVAL '1 day')
-        AND value::numeric > 0
+        AND io_value::numeric > 0
       GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
     `;
