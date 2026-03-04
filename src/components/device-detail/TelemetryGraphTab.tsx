@@ -23,18 +23,6 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
   const [timeRange, setTimeRange] = useState<string>("24h");
   const [loading, setLoading] = useState(true);
 
-  // Available metrics to graph
-  // const metrics = [
-  //   { key: "position.speed", label: "Speed", unit: "km/h", color: "#00c853" },
-  //   { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3" },
-  //   { key: "position.longitude", label: "Longitude", unit: "°", color: "#ff9800" },
-  //   { key: "position.altitude", label: "Altitude", unit: "m", color: "#9c27b0" },
-  //   { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336" },
-  //   { key: "external.powersource.voltage", label: "External Voltage", unit: "V", color: "#4caf50" },
-  //   { key: "battery.voltage", label: "Battery Voltage", unit: "V", color: "#ffeb3b" },
-  //   { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4" },
-  // ];
-
   const metrics = [
     { key: "position.speed", label: "Speed", unit: "km/h", color: "#00c853", transform: (v: number) => v },
     { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3", transform: (v: number) => v / 10000000 },

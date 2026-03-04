@@ -12,6 +12,7 @@ import { LogsTab } from "../device-detail/LogsTab";
 import { SettingsTab } from "../device-detail/SettingsTab";
 import { timeAgo } from "@/lib/utils";
 import { MapTab } from "../device-detail/MapTab";
+import { AnalyticsTab } from "../device-detail/AnalyticsTab";
 
 interface DeviceDetailProps {
   device: Device;
@@ -45,7 +46,8 @@ export function DeviceDetail({
     { key: "info" as DeviceTab, label: "INFO", icon: Icons.Info },
     { key: "edit" as DeviceTab, label: "EDIT", icon: Icons.Edit },
     { key: "telemetry" as DeviceTab, label: "TELEMETRY", icon: Icons.Telemetry },
-    { key: "graphs" as DeviceTab, label: "GRAPHS", icon: Icons.TrendingUp }, // <<<< ADD THIS
+    { key: "graphs" as DeviceTab, label: "GRAPHS", icon: Icons.TrendingUp },
+    { key: "analytics" as DeviceTab, label: "ANALYTICS", icon: Icons.TrendingUp },
     { key: "commands" as DeviceTab, label: "COMMANDS", icon: Icons.Commands },
     { key: "logs" as DeviceTab, label: "LOGS & MESSAGES", icon: Icons.Logs },
     { key: "settings" as DeviceTab, label: "SETTINGS", icon: Icons.Settings },
@@ -212,6 +214,7 @@ export function DeviceDetail({
         />}
         {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} />}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
+        {selectedTab === "analytics" && <AnalyticsTab device={device} />}
         {selectedTab === "commands" && (
           <CommandsTab device={device} /> 
         )}
