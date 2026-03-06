@@ -816,7 +816,7 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   const fetchTrips = async () => {
     setTripsLoading(true);
     try {
-      const res = await fetch(`/api/trips?device_id=${device.id}&days=${days}`);
+      const res = await fetch(`/api/analytics/trips?device_id=${device.id}&days=${days}`);
       const data = await res.json();
       if (data.success) { setTrips(data.trips); setTripSummary(data.summary); }
     } catch { /* non-fatal */ }
@@ -826,7 +826,7 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   const fetchIdle = async () => {
     setIdleLoading(true);
     try {
-      const res = await fetch(`/api/idle?device_id=${device.id}&days=${days}`);
+      const res = await fetch(`/api/analytics/idle?device_id=${device.id}&days=${days}`);
       const data = await res.json();
       if (data.success) { setIdleSummary(data.summary); setDailyIdle(data.daily); }
     } catch { /* non-fatal */ }
