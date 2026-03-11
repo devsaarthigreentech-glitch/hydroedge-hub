@@ -305,7 +305,6 @@
 //     </button>
 //   );
 // }
-
 "use client";
 
 import React from "react";
@@ -489,7 +488,7 @@ export function Sidebar({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {customer.company_name || customer.name}
+                  {customer.name}{customer.company_name ? ` — ${customer.company_name}` : ""}
                 </span>
 
                 {/* Arrow when selected */}
