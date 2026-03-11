@@ -42,8 +42,8 @@ export function TopBar({
     >
       {/* Breadcrumb */}
       <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-        <Icons.Menu />
-        <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span>
+        {/* <Icons.Menu /> */}
+        {/* <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span> */}
         
         {currentView === "devices" && (
           <>
