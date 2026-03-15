@@ -50,6 +50,7 @@ export function DeviceDetail({
     { key: "graphs" as DeviceTab, label: "GRAPHS", icon: Icons.TrendingUp },
     { key: "analytics" as DeviceTab, label: "ANALYTICS", icon: Icons.TrendingUp },
     { key: "commands" as DeviceTab, label: "COMMANDS", icon: Icons.Commands },
+    { key: "config" as DeviceTab, label: "CONFIG", icon: Icons.Commands },
     { key: "logs" as DeviceTab, label: "LOGS & MESSAGES", icon: Icons.Logs },
     { key: "settings" as DeviceTab, label: "SETTINGS", icon: Icons.Settings },
     { key: "map" as DeviceTab, label: "MAP", icon: Icons.MapPin }
