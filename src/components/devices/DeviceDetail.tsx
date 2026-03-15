@@ -13,6 +13,7 @@ import { SettingsTab } from "../device-detail/SettingsTab";
 import { timeAgo } from "@/lib/utils";
 import { MapTab } from "../device-detail/MapTab";
 import { AnalyticsTab } from "../device-detail/AnalyticsTab";
+import { TeltonikaConfigurator } from "../device-detail/TeltonikaConfigurator";
 
 interface DeviceDetailProps {
   device: Device;
@@ -217,6 +218,9 @@ export function DeviceDetail({
         {selectedTab === "analytics" && <AnalyticsTab device={device} />}
         {selectedTab === "commands" && (
           <CommandsTab device={device} /> 
+        )}
+        {selectedTab === "config" && (
+          <TeltonikaConfigurator device={device} /> 
         )}
         {selectedTab === "map" && <MapTab device={device} />}
         {selectedTab === "logs" && <LogsTab device={device} />}
