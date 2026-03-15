@@ -8,12 +8,12 @@ import { Device } from "@/types";
 // ============================================================================
 
 interface CommandLogEntry {
-  id: number;
-  type: string;
+  id: string;
   command: string;
-  response: string | null;
   status: string;
-  timestamp: string;
+  response: string | null;
+  error_message: string | null;
+  sent_at: string;
 }
 
 interface SelectOption {
@@ -311,33 +311,35 @@ export function TeltonikaConfigurator({ device }: TeltonikaConfiguratorProps) {
 
   const category = PARAMETER_CATEGORIES.find((c) => c.id === selectedCategory);
 
+  // Fetch real command history from API — polls every 3 seconds
+  const fetchCommandHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/commands?device_id=${device.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setCommandLog(data.data);
+      }
+    } catch (err) {
+      console.error("Error fetching commands:", err);
+    }
+  }, [device.id]);
+
+  useEffect(() => {
+    fetchCommandHistory();
+    const interval = setInterval(fetchCommandHistory, 3000);
+    return () => clearInterval(interval);
+  }, [fetchCommandHistory]);
+
+  // Auto-scroll log to bottom
   useEffect(() => {
     if (logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [commandLog]);
 
-  const addLog = useCallback((type: string, command: string, response: string | null = null, status = "pending"): number => {
-    const entry: CommandLogEntry = {
-      id: Date.now() + Math.random(),
-      type,
-      command,
-      response,
-      status,
-      timestamp: new Date().toISOString(),
-    };
-    setCommandLog((prev) => [...prev, entry]);
-    return entry.id;
-  }, []);
-
-  const updateLog = useCallback((id: number, updates: Partial<CommandLogEntry>) => {
-    setCommandLog((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
-  }, []);
-
   // Send command via your existing /api/commands endpoint
   const sendCommand = useCallback(
-    async (command: string, logId: number | null = null) => {
-      const id = logId || addLog("command", command);
+    async (command: string) => {
       setIsSending(command);
 
       try {
@@ -352,19 +354,20 @@ export function TeltonikaConfigurator({ device }: TeltonikaConfiguratorProps) {
 
         const data = await response.json();
 
-        if (data.success) {
-          updateLog(id, { status: "queued", response: "Command queued — waiting for device" });
-        } else {
-          updateLog(id, { status: "error", response: data.error || "Failed to queue" });
+        if (!data.success) {
+          alert("Failed to queue command: " + (data.error || "Unknown error"));
         }
+
+        // Immediately refresh to show the new command
+        await fetchCommandHistory();
       } catch (error) {
-        updateLog(id, { status: "error", response: "Network error" });
+        console.error("Error sending command:", error);
+        alert("Error sending command");
       }
 
       setIsSending(null);
-      return id;
     },
-    [device.id, addLog, updateLog]
+    [device.id, fetchCommandHistory]
   );
 
   const readParam = useCallback(
@@ -815,14 +818,22 @@ export function TeltonikaConfigurator({ device }: TeltonikaConfiguratorProps) {
                     fontWeight: 700,
                     textTransform: "uppercase",
                     background:
-                      entry.status === "queued"
+                      entry.status === "executed"
+                        ? "rgba(0,200,83,0.2)"
+                        : entry.status === "delivered"
                         ? "rgba(0,200,83,0.15)"
+                        : entry.status === "sent"
+                        ? "rgba(59,130,246,0.15)"
                         : entry.status === "pending"
                         ? "rgba(251,191,36,0.15)"
                         : "rgba(239,68,68,0.15)",
                     color:
-                      entry.status === "queued"
+                      entry.status === "executed"
+                        ? "#4ade80"
+                        : entry.status === "delivered"
                         ? "#00c853"
+                        : entry.status === "sent"
+                        ? "#60a5fa"
                         : entry.status === "pending"
                         ? "#fbbf24"
                         : "#f87171",
@@ -831,15 +842,15 @@ export function TeltonikaConfigurator({ device }: TeltonikaConfiguratorProps) {
                   {entry.status}
                 </span>
                 <code style={{ fontSize: 10, color: "#c4b5fd", fontWeight: 600 }}>{entry.command}</code>
-              </div>
-              <div style={{ fontSize: 8, color: "#525252" }}>
-                {new Date(entry.timestamp).toLocaleTimeString()}
+                <span style={{ fontSize: 8, color: "#525252", marginLeft: "auto" }}>
+                  {entry.sent_at ? new Date(entry.sent_at).toLocaleTimeString() : ""}
+                </span>
               </div>
               {entry.response && (
                 <div
                   style={{
                     marginTop: 3,
-                    padding: "3px 6px",
+                    padding: "4px 6px",
                     borderRadius: 3,
                     background: "rgba(0,200,83,0.06)",
                     fontSize: 9,
@@ -849,6 +860,22 @@ export function TeltonikaConfigurator({ device }: TeltonikaConfiguratorProps) {
                   }}
                 >
                   {entry.response}
+                </div>
+              )}
+              {entry.error_message && (
+                <div
+                  style={{
+                    marginTop: 3,
+                    padding: "4px 6px",
+                    borderRadius: 3,
+                    background: "rgba(239,68,68,0.06)",
+                    fontSize: 9,
+                    color: "#f87171",
+                    fontFamily: "monospace",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {entry.error_message}
                 </div>
               )}
             </div>
