@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
         const mileage = mileageMap.get(day);
         const fuel = fuelMap.get(day);
         const distanceMeters = parseFloat(mileage?.daily_distance_meters || 0);
-        const distance = parseFloat((distanceMeters / 1000).toFixed(2));
+        const distance = parseFloat(((distanceMeters / 1000)* 1.03).toFixed(2));
         const fuelConsumed = parseFloat(fuel?.daily_fuel || 0);
         const fuelAverage =
           fuelConsumed > 0 ? parseFloat((distance / fuelConsumed).toFixed(2)) : null;
