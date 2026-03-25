@@ -18,7 +18,7 @@ export function DeviceSearchBar({
       style={{
         height: 48,
         background: THEME.background.card,
-        borderTop: "1px solid #444",
+        borderTop: `1px solid ${THEME.border.light}`,
         display: "flex",
         alignItems: "center",
         padding: "0 16px",
