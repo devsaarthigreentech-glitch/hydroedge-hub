@@ -30,7 +30,7 @@ export function DeviceList({
       {/* Search and Stats Header */}
       <div
         style={{
-          padding: 20,
+          padding: 10,
           background: THEME.background.card,
           borderBottom: `1px solid ${THEME.border.light}`,
         }}

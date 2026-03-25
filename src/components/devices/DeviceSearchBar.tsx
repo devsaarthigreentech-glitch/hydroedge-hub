@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Icons } from "@/components/ui/Icons";
+import { THEME } from "@/lib/theme";
 
 interface DeviceSearchBarProps {
   searchQuery: string;
@@ -16,7 +17,7 @@ export function DeviceSearchBar({
     <div
       style={{
         height: 48,
-        background: "#333",
+        background: THEME.background.card,
         borderTop: "1px solid #444",
         display: "flex",
         alignItems: "center",
