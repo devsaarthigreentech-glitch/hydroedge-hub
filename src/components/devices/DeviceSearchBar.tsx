@@ -33,7 +33,7 @@ export function DeviceSearchBar({
         style={{
           flex: 1,
           background: "transparent",
-          border: "none",
+          border: `1px solid ${THEME.border.light}`,
           outline: "none",
           color: "#e0e0e0",
           fontSize: 13,
