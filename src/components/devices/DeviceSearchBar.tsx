@@ -18,7 +18,7 @@ export function DeviceSearchBar({
       style={{
         height: 48,
         background: THEME.background.card,
-        borderTop: `1px solid ${THEME.border.light}`,
+        border: `1px solid ${THEME.border.light}`,
         display: "flex",
         alignItems: "center",
         padding: "0 16px",
@@ -33,7 +33,7 @@ export function DeviceSearchBar({
         style={{
           flex: 1,
           background: "transparent",
-          border: `1px solid ${THEME.border.light}`,
+          border: "none",
           outline: "none",
           color: "#e0e0e0",
           fontSize: 13,
@@ -46,7 +46,7 @@ export function DeviceSearchBar({
           style={{
             background: "none",
             border: "none",
-            color: "#6b7280",
+            color: "#e0e0e0",
             cursor: "pointer",
             padding: 4,
             display: "flex",
