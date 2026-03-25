@@ -38,7 +38,7 @@ export function DeviceList({
         <DeviceSearchBar searchQuery={searchQuery} onSearchChange={onSearchChange} />
 
         {/* Quick Stats */}
-        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+        {/* <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
           <StatCard
             icon={<Icons.Devices />}
             label="Total Devices"
@@ -60,7 +60,7 @@ export function DeviceList({
             color={THEME.neutral[500]}
             bgColor={THEME.neutral[100]}
           />
-        </div>
+        </div> */}
       </div>
 
       {/* Device Table Header */}
