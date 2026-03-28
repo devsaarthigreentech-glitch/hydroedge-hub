@@ -294,7 +294,18 @@ function NavButton({
       <div style={{ flexShrink: 0 }}>{icon}</div>
       {isOpen && <span>{label}</span>}
 
-      <span>{count}</span>
+      <span
+      style={{
+        background: isActive ? THEME.primary[200] : THEME.neutral[200],
+        color: isActive ? THEME.primary[700] : THEME.text.secondary,
+        borderRadius: 10,
+        padding: "2px 7px",
+        fontSize: 11,
+        fontWeight: 700,
+        lineHeight: 1.4,
+      }}
+      >{count}
+      </span>
       
     </button>
   );
