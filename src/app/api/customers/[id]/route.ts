@@ -380,10 +380,10 @@ export async function GET(
 // PATCH /api/customers/[id]
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const body = await req.json();
 
     const ALLOWED_FIELDS = [
