@@ -311,10 +311,10 @@ import { query } from "@/lib/db";
 // Returns full customer row + stats (device counts, sub-customer count, asset types)
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // 1. Fetch the customer row
     const customerResult = await query(
