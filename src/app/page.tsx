@@ -107,7 +107,7 @@ export default function HomePage() {
     }
   }, [selectedDevice]);
 
-  const customerCount = filterDevices(devices,"","all");
+  const deviceCount = filterDevices(devices,"","all");
 
   const filteredDevices = filterDevices(devices, searchQuery, customerFilter);
 
@@ -261,6 +261,7 @@ export default function HomePage() {
         selectedCustomerId={selectedCustomer?.id}
         onCustomerSelect={handleCustomerSelect}
         customerCount={customers.length}
+        deviceCount={deviceCount.length}
       />
 
       {/* Main content */}

@@ -16,7 +16,8 @@ interface SidebarProps {
   // New props for customer detail navigation
   selectedCustomerId?: string;
   onCustomerSelect: (customer: Customer) => void;
-  customerCount: number;
+  customerCount?: number;
+  deviceCount?: number;
 }
 
 export function Sidebar({
@@ -29,7 +30,8 @@ export function Sidebar({
   onCustomerFilterChange,
   selectedCustomerId,
   onCustomerSelect,
-  customerCount
+  customerCount,
+  deviceCount
 }: SidebarProps) {
   return (
     <div
@@ -107,6 +109,7 @@ export function Sidebar({
           isActive={currentView === "devices"}
           isOpen={isOpen}
           onClick={() => onViewChange("devices")}
+          count={deviceCount}
         />
         <NavButton
           icon={<Icons.Customers />}
