@@ -260,7 +260,7 @@ export default function HomePage() {
         onCustomerFilterChange={handleCustomerFilterChange}
         selectedCustomerId={selectedCustomer?.id}
         onCustomerSelect={handleCustomerSelect}
-        customerCount={customerCount.length}
+        customerCount={customers.length}
       />
 
       {/* Main content */}
