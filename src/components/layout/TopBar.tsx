@@ -79,7 +79,7 @@ export function TopBar({
 
       {/* Stats */}
       <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
-        <div
+        {/* <div
           style={{
             display: "flex",
             alignItems: "center",
@@ -129,7 +129,7 @@ export function TopBar({
               {deviceCount}
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* User Profile */}
         <div
