@@ -115,10 +115,11 @@ export async function PATCH(
 
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
   ) {
     try {
-      const deviceId = params.id;
+        const resolved = await params;
+        const deviceId = resolved.id;
   
       // Soft delete — keeps history intact, just marks it inactive
       // If you want hard delete, replace with: DELETE FROM devices WHERE id = $1
