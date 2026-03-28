@@ -50,10 +50,10 @@ import { query } from "@/lib/db";
 // GET /api/customers/[id]/devices?asset_type=Solar+Plant
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const { searchParams } = new URL(req.url);
     const assetType = searchParams.get("asset_type"); // null = all
 
