@@ -105,7 +105,7 @@ const SHARED_IO_MAP: Record<number, IOParam> = {
 const FMB150_ONLY: Record<number, IOParam> = {
   80:  { name: "data.mode.enum",                   category: "system" },
   69:  { name: "gnss.state.enum",                  category: "gps" },
-  16:  { name: "vehicle.mileage",                  unit: "m",   category: "vehicle" },
+  16:  { name: "vehicle.mileage",                  unit: "km",   category: "vehicle", multiplier: 0.001 },
   // Accelerometer (FMB150 uses 17/18/19)
   17:  { name: "accelerometer.x",                  unit: "mG",  category: "motion" },
   // NOTE: 18 is CAN fuel rate in shared — on FMB150 without CAN it's accel Y
@@ -135,7 +135,7 @@ const FMB150_ONLY: Record<number, IOParam> = {
 const FMC650_ONLY: Record<number, IOParam> = {
   22:  { name: "data.mode.enum",                   category: "system" },
   71:  { name: "gnss.state.enum",                  category: "gps" },
-  216: { name: "vehicle.mileage",                  unit: "m",   category: "vehicle" },
+  216: { name: "vehicle.mileage",                  unit: "km",   category: "vehicle", multiplier: 0.001 },
   // Accelerometer (FMC650 uses 236/237/238)
   236: { name: "accelerometer.x",                  unit: "mG",  category: "motion" },
   237: { name: "accelerometer.y",                  unit: "mG",  category: "motion" },
