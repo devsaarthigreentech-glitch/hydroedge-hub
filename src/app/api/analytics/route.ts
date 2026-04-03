@@ -235,6 +235,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "device_id required" }, { status: 400 });
   }
 
+  // Look up device type to determine correct mileage IO ID
+  const deviceResult = await query(
+    `SELECT device_type FROM devices WHERE id = $1 AND deleted_at IS NULL`,
+    [device_id]
+  );
+
+  if (deviceResult.rows.length === 0) {
+    return NextResponse.json({ error: "Device not found" }, { status: 404 });
+  }
+
+  const deviceType = deviceResult.rows[0].device_type;
+  const mileageIOId = deviceType === "FMC650" ? 216 : 16;
+
   // When datetimes are provided, use a direct BETWEEN on the timestamp column.
   // PostgreSQL will correctly interpret the +05:30 timezone offset.
   // This also benefits from the plain timestamp index — no DATE() cast needed.
@@ -256,7 +269,7 @@ export async function GET(request: NextRequest) {
         MAX(io_value::numeric) - MIN(io_value::numeric) as daily_distance_meters
       FROM io_records
       WHERE device_id = $1
-        AND io_id = 16
+        AND io_id = ${mileageIOId}
         AND ${timeFilter}
         AND io_value::numeric > 0
       GROUP BY DATE(timestamp AT TIME ZONE 'Asia/Kolkata')
