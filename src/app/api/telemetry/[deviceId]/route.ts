@@ -42,7 +42,7 @@ const SHARED_IO_MAP: Record<number, IOParam> = {
   240: { name: "movement.status",                  category: "system" },
 
   // Odometer (GPS-based)
-  199: { name: "segment.vehicle.mileage",          unit: "m",       category: "vehicle" },
+  199: { name: "segment.vehicle.mileage",          unit: "km",       category: "vehicle",  multiplier: 0.001 },
 
   // GPS-based fuel
   12:  { name: "gps.fuel.used",                    unit: "l",       category: "fuel",        multiplier: 0.001 },
@@ -88,6 +88,7 @@ const SHARED_IO_MAP: Record<number, IOParam> = {
   88:  { name: "can.engine.rpm.fms",               unit: "rpm",     category: "can" },
   103: { name: "can.counted.engine.motorhours",    unit: "h",       category: "can",         multiplier: 0.01 },
   104: { name: "can.engine.hours",                 unit: "h",       category: "can" },
+  105: { name: "can.tracker.counted.mileage",      unit: "km",      category: "can",         multiplier: 0.001 },
   107: { name: "can.tracker.counted.fuel.consumed",unit: "l",       category: "can",         multiplier: 0.1 },
   127: { name: "can.coolant.temperature",          unit: "°C",      category: "can" },
   128: { name: "can.ambient.temperature",          unit: "°C",      category: "can" },
@@ -231,14 +232,40 @@ export async function GET(
       [deviceId]
     );
 
+    // const ioResult = await query(
+    //   `SELECT DISTINCT ON (io_id)
+    //     io_id,
+    //     io_value,
+    //     timestamp
+    //   FROM io_records
+    //   WHERE device_id = $1
+    //   ORDER BY io_id, timestamp DESC`,
+    //   [deviceId]
+    // );
     const ioResult = await query(
-      `SELECT DISTINCT ON (io_id)
-        io_id,
-        io_value,
-        timestamp
-      FROM io_records
-      WHERE device_id = $1
-      ORDER BY io_id, timestamp DESC`,
+      `WITH RECURSIVE distinct_io AS (
+        (SELECT io_id FROM io_records
+         WHERE device_id = $1
+         ORDER BY io_id LIMIT 1)
+        UNION ALL
+        (SELECT (SELECT io_id FROM io_records
+                 WHERE device_id = $1
+                   AND io_id > d.io_id
+                 ORDER BY io_id LIMIT 1)
+         FROM distinct_io d
+         WHERE d.io_id IS NOT NULL)
+      )
+      SELECT io.io_id, io.io_value, io.timestamp
+      FROM distinct_io d
+      CROSS JOIN LATERAL (
+        SELECT io_id, io_value, timestamp
+        FROM io_records
+        WHERE device_id = $1
+          AND io_id = d.io_id
+        ORDER BY timestamp DESC
+        LIMIT 1
+      ) io
+      WHERE d.io_id IS NOT NULL`,
       [deviceId]
     );
 

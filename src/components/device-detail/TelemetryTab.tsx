@@ -1,16 +1,18 @@
 "use client";
 
 import React, { useState } from "react";
-import { TelemetryParameter } from "@/types";
+import { Device, TelemetryParameter } from "@/types";
 import { THEME } from "@/lib/theme";
 import { timeAgo, formatTimestamp } from "@/lib/utils";
+import { GreenXHealthPanel } from "./HealthPanel";
 
 interface TelemetryTabProps {
   telemetry: TelemetryParameter[];
   lastUpdate?: string;
+  device?: Device;
 }
 
-export function TelemetryTab({ telemetry, lastUpdate }: TelemetryTabProps) {
+export function TelemetryTab({ telemetry, lastUpdate, device }: TelemetryTabProps) {
   const [filter, setFilter] = useState<"all" | "system" | "sensor">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -96,6 +98,20 @@ export function TelemetryTab({ telemetry, lastUpdate }: TelemetryTabProps) {
           Real-time sensor data and system parameters
         </div>
       </div>
+
+      {(device?.asset_name === "DG" || device?.asset_name === "EOW") && (
+        <GreenXHealthPanel
+          deviceId={device.id}
+          deviceType={device.device_type}
+          deviceModel={
+            device.asset_name === "EOW" ? "EOW" :
+              device.device_name?.includes("1500") ? "1500KVA" :
+                device.device_name?.includes("625") ? "625KVA" :
+                  "380KVA"
+          }
+          telemetry={telemetry}
+        />
+      )}
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
@@ -288,7 +304,7 @@ function TelemetryGroup({
             // Format value: show unit inline, handle booleans nicely
             const displayValue = (() => {
               const v = String(param.value);
-              if (v === "true")  return "✅ ON";
+              if (v === "true") return "✅ ON";
               if (v === "false") return "❌ OFF";
               if (v === "1" && (param.name.includes("ignition") || param.name.includes("din") || param.name.includes("dout"))) return "✅ ON";
               if (v === "0" && (param.name.includes("ignition") || param.name.includes("din") || param.name.includes("dout"))) return "❌ OFF";

@@ -214,7 +214,7 @@ export function DeviceDetail({
           onDeviceDeleted?.();
         }}
         />}
-        {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} />}
+        {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} device={device}/>}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
         {selectedTab === "analytics" && <AnalyticsTab device={device} />}
         {selectedTab === "commands" && (

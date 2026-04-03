@@ -92,12 +92,12 @@ export function CommandsTab({ device }: CommandsTabProps) {
           </button>
         ))}
         {/* Digital output controls */}
-        <button onClick={() => setCommandText("setdigout 1??? 60 0 0 0")} style={{background: "#2a2a2a", border: "1px solid #3a3a3a", borderRadius: 6, padding: "6px 12px", color: "#00e676", fontSize: 11, cursor: "pointer", fontFamily: "inherit"}}>
+        {/* <button onClick={() => setCommandText("setdigout 1??? 60 0 0 0")} style={{background: "#2a2a2a", border: "1px solid #3a3a3a", borderRadius: 6, padding: "6px 12px", color: "#00e676", fontSize: 11, cursor: "pointer", fontFamily: "inherit"}}>
           DOUT1 ON (60s)
         </button>
         <button onClick={() => setCommandText("setdigout 0??? 0 0 0 0")} style={{background: "#2a2a2a", border: "1px solid #3a3a3a", borderRadius: 6, padding: "6px 12px", color: "#ef4444", fontSize: 11, cursor: "pointer", fontFamily: "inherit"}}>
           DOUT1 OFF
-        </button>
+        </button> */}
       </div>
 
       {/* Command input */}

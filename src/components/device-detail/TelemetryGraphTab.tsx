@@ -25,13 +25,13 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
 
   const metrics = [
     { key: "position.speed", label: "Speed", unit: "km/h", color: "#00c853", transform: (v: number) => v },
-    { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3", transform: (v: number) => v / 10000000 },
-    { key: "position.longitude", label: "Longitude", unit: "°", color: "#ff9800", transform: (v: number) => v / 10000000 },
-    { key: "position.altitude", label: "Altitude", unit: "m", color: "#9c27b0", transform: (v: number) => v },
-    { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336", transform: (v: number) => v },
+    // { key: "position.latitude", label: "Latitude", unit: "°", color: "#2196f3", transform: (v: number) => v / 10000000 },
+    // { key: "position.longitude", label: "Longitude", unit: "°", color: "#ff9800", transform: (v: number) => v / 10000000 },
+    // { key: "position.altitude", label: "Altitude", unit: "m", color: "#9c27b0", transform: (v: number) => v },
+    // { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336", transform: (v: number) => v },
     { key: "external.powersource.voltage", label: "External Voltage", unit: "V", color: "#4caf50", transform: (v: number) => v / 1000 },
     { key: "battery.voltage", label: "Battery Voltage", unit: "V", color: "#ffeb3b", transform: (v: number) => v / 1000 },
-    { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4", transform: (v: number) => v },
+    // { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4", transform: (v: number) => v },
   ];
 
   useEffect(() => {

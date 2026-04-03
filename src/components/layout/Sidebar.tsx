@@ -80,7 +80,7 @@ export function Sidebar({
                 SGT Hydroedge
               </div>
               <div style={{ fontSize: 10, color: "rgba(255,255,255,0.8)" }}>
-                v1.0.1
+                v2.0.0
               </div>
             </div>
           </div>

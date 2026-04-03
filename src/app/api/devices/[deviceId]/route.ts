@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { param } from "framer-motion/client";
 
 export async function PATCH(
     request: NextRequest,
@@ -113,36 +112,33 @@ export async function PATCH(
     }
 }
 
-// export async function DELETE(
-//     request: NextRequest,
-//     { params }: { params: Promise<{ id: string }> }
-//   ) {
-//     try {
-//         const resolved = await params;
-//         const deviceId = resolved.id;
+export async function DELETE(
+    request: NextRequest,
+    { params }: { params: Promise<{ deviceId: string }> }
+  ) {
+    try {
+        const resolved = await params;
+        const deviceId = resolved.deviceId;
   
-//       // Soft delete — keeps history intact, just marks it inactive
-//       // If you want hard delete, replace with: DELETE FROM devices WHERE id = $1
-//       const sql = `
-//         UPDATE devices 
-//         SET status = 'deleted', deleted_at = NOW(), updated_at = NOW()
-//         WHERE id = $1
-//         RETURNING id, device_name, imei
-//       `;
+      const sql = `
+        DELETE FROMd devices
+        WHERE id = $1
+        RETURNING id, device_name, imei
+      `;
   
-//       const result = await query(sql, [deviceId]);
+      const result = await query(sql, [deviceId]);
   
-//       if (result.rows.length === 0) {
-//         return NextResponse.json({ error: "Device not found" }, { status: 404 });
-//       }
+      if (result.rows.length === 0) {
+        return NextResponse.json({ error: "Device not found" }, { status: 404 });
+      }
   
-//       return NextResponse.json({ 
-//         success: true, 
-//         message: `Device ${result.rows[0].device_name} (${result.rows[0].imei}) deleted`,
-//         device: result.rows[0]
-//       });
-//     } catch (error) {
-//       console.error("DELETE /api/devices/[id] error:", error);
-//       return NextResponse.json({ error: "Failed to delete device" }, { status: 500 });
-//     }
-//   }
+      return NextResponse.json({ 
+        success: true, 
+        message: `Device ${result.rows[0].device_name} (${result.rows[0].imei}) deleted`,
+        device: result.rows[0]
+      });
+    } catch (error) {
+      console.error("DELETE /api/devices/[id] error:", error);
+      return NextResponse.json({ error: "Failed to delete device" }, { status: 500 });
+    }
+  }
