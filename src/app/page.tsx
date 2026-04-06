@@ -1,350 +1,355 @@
-"use client";
+// "use client";
 
-import React, { useState, useEffect } from "react";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { TopBar } from "@/components/layout/TopBar";
-import { DeviceList } from "@/components/devices/DeviceList";
-import { DeviceDetail } from "@/components/devices/DeviceDetail";
-import { CustomerList } from "@/components/customers/CustomerList";
-import { CustomerDetail } from "@/components/customers/CustomerDetail";
-import { AddCustomerModal } from "@/components/customers/AddCustomerModal";
-import { filterDevices } from "@/lib/utils";
-import { Device, Customer, ViewType, Command } from "@/types";
+// import React, { useState, useEffect } from "react";
+// import { Sidebar } from "@/components/layout/Sidebar";
+// import { TopBar } from "@/components/layout/TopBar";
+// import { DeviceList } from "@/components/devices/DeviceList";
+// import { DeviceDetail } from "@/components/devices/DeviceDetail";
+// import { CustomerList } from "@/components/customers/CustomerList";
+// import { CustomerDetail } from "@/components/customers/CustomerDetail";
+// import { AddCustomerModal } from "@/components/customers/AddCustomerModal";
+// import { filterDevices } from "@/lib/utils";
+// import { Device, Customer, ViewType, Command } from "@/types";
 
-export default function HomePage() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [currentView, setCurrentView] = useState<ViewType>("devices");
-  const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [customerFilter, setCustomerFilter] = useState("all");
-  const [telemetryData, setTelemetryData] = useState<any[]>([]);
-  const [commandHistory, setCommandHistory] = useState<Command[]>([]);
-  const [showCustomerModal, setShowCustomerModal] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<string | undefined>(undefined);
+// export default function HomePage() {
+//   const [sidebarOpen, setSidebarOpen] = useState(true);
+//   const [currentView, setCurrentView] = useState<ViewType>("devices");
+//   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+//   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+//   const [searchQuery, setSearchQuery] = useState("");
+//   const [customerFilter, setCustomerFilter] = useState("all");
+//   const [telemetryData, setTelemetryData] = useState<any[]>([]);
+//   const [commandHistory, setCommandHistory] = useState<Command[]>([]);
+//   const [showCustomerModal, setShowCustomerModal] = useState(false);
+//   const [lastUpdate, setLastUpdate] = useState<string | undefined>(undefined);
 
-  // Real data from API
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+//   // Real data from API
+//   const [devices, setDevices] = useState<Device[]>([]);
+//   const [customers, setCustomers] = useState<Customer[]>([]);
+//   const [loading, setLoading] = useState(true);
+//   const [error, setError] = useState<string | null>(null);
 
-  const handleDeviceDeleted = () => {
-    setDevices(prev => prev.filter(d => d.id !== selectedDevice?.id));
-    setSelectedDevice(null);
-  };
+//   const handleDeviceDeleted = () => {
+//     setDevices(prev => prev.filter(d => d.id !== selectedDevice?.id));
+//     setSelectedDevice(null);
+//   };
 
-  const handleDeviceUpdated = (updatedDevice: Device) => {
-    setDevices(prev => prev.map(d => d.id === updatedDevice.id ? { ...d, ...updatedDevice } : d));
-    setSelectedDevice(prev => prev ? { ...prev, ...updatedDevice } : null);
-  };
+//   const handleDeviceUpdated = (updatedDevice: Device) => {
+//     setDevices(prev => prev.map(d => d.id === updatedDevice.id ? { ...d, ...updatedDevice } : d));
+//     setSelectedDevice(prev => prev ? { ...prev, ...updatedDevice } : null);
+//   };
 
-  // Fetch customers from database
-  useEffect(() => {
-    async function fetchCustomers() {
-      try {
-        const response = await fetch('/api/customers');
-        const data = await response.json();
-        if (data.success) {
-          setCustomers(data.data);
-        } else {
-          setError(data.error || 'Failed to fetch customers');
-        }
-      } catch (err: any) {
-        console.error('Error fetching customers:', err);
-        setError(err.message);
-      }
-    }
-    fetchCustomers();
-  }, []);
+//   // Fetch customers from database
+//   useEffect(() => {
+//     async function fetchCustomers() {
+//       try {
+//         const response = await fetch('/api/customers');
+//         const data = await response.json();
+//         if (data.success) {
+//           setCustomers(data.data);
+//         } else {
+//           setError(data.error || 'Failed to fetch customers');
+//         }
+//       } catch (err: any) {
+//         console.error('Error fetching customers:', err);
+//         setError(err.message);
+//       }
+//     }
+//     fetchCustomers();
+//   }, []);
 
-  // Fetch devices from database
-  useEffect(() => {
-    async function fetchDevices() {
-      try {
-        setLoading(true);
-        const url = customerFilter === 'all'
-          ? '/api/devices'
-          : `/api/devices?customer_id=${customerFilter}`;
+//   // Fetch devices from database
+//   useEffect(() => {
+//     async function fetchDevices() {
+//       try {
+//         setLoading(true);
+//         const url = customerFilter === 'all'
+//           ? '/api/devices'
+//           : `/api/devices?customer_id=${customerFilter}`;
 
-        const response = await fetch(url);
-        const data = await response.json();
+//         const response = await fetch(url);
+//         const data = await response.json();
 
-        if (data.success) {
-          setDevices(data.data);
-        } else {
-          setError(data.error || 'Failed to fetch devices');
-        }
-      } catch (err: any) {
-        console.error('Error fetching devices:', err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchDevices();
-  }, [customerFilter]);
+//         if (data.success) {
+//           setDevices(data.data);
+//         } else {
+//           setError(data.error || 'Failed to fetch devices');
+//         }
+//       } catch (err: any) {
+//         console.error('Error fetching devices:', err);
+//         setError(err.message);
+//       } finally {
+//         setLoading(false);
+//       }
+//     }
+//     fetchDevices();
+//   }, [customerFilter]);
 
-  // Fetch real-time telemetry from database
-  useEffect(() => {
-    if (selectedDevice) {
-      async function fetchTelemetry() {
-        try {
-          const response = await fetch(`/api/telemetry/${selectedDevice?.id}`);
-          const data = await response.json();
-          if (data.success) {
-            setTelemetryData(data.data);
-            setLastUpdate(data.lastUpdate);
-          }
-        } catch (err) {
-          console.error('Error fetching telemetry:', err);
-        }
-      }
+//   // Fetch real-time telemetry from database
+//   useEffect(() => {
+//     if (selectedDevice) {
+//       async function fetchTelemetry() {
+//         try {
+//           const response = await fetch(`/api/telemetry/${selectedDevice?.id}`);
+//           const data = await response.json();
+//           if (data.success) {
+//             setTelemetryData(data.data);
+//             setLastUpdate(data.lastUpdate);
+//           }
+//         } catch (err) {
+//           console.error('Error fetching telemetry:', err);
+//         }
+//       }
 
-      fetchTelemetry();
-      const interval = setInterval(fetchTelemetry, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [selectedDevice]);
+//       fetchTelemetry();
+//       const interval = setInterval(fetchTelemetry, 30000);
+//       return () => clearInterval(interval);
+//     }
+//   }, [selectedDevice]);
 
-  const deviceCount = filterDevices(devices,"","all");
+//   const deviceCount = filterDevices(devices,"","all");
 
-  const filteredDevices = filterDevices(devices, searchQuery, customerFilter);
+//   const filteredDevices = filterDevices(devices, searchQuery, customerFilter);
 
-  const handleDeviceSelect = (device: Device) => {
-    setSelectedDevice(device);
-  };
+//   const handleDeviceSelect = (device: Device) => {
+//     setSelectedDevice(device);
+//   };
 
-  const handleCloseDevice = () => {
-    setSelectedDevice(null);
-  };
+//   const handleCloseDevice = () => {
+//     setSelectedDevice(null);
+//   };
 
-  const handleSendCommand = (command: string) => {
-    if (!command.trim() || !selectedDevice) return;
+//   const handleSendCommand = (command: string) => {
+//     if (!command.trim() || !selectedDevice) return;
 
-    const newCommand: Command = {
-      id: Date.now(),
-      command: command,
-      status: "sent",
-      sent_at: new Date().toISOString(),
-    };
+//     const newCommand: Command = {
+//       id: Date.now(),
+//       command: command,
+//       status: "sent",
+//       sent_at: new Date().toISOString(),
+//     };
 
-    setCommandHistory((prev) => [newCommand, ...prev]);
+//     setCommandHistory((prev) => [newCommand, ...prev]);
 
-    setTimeout(() => {
-      setCommandHistory((prev) =>
-        prev.map((c) =>
-          c.id === newCommand.id
-            ? { ...c, status: "executed", response: "OK", executed_at: new Date().toISOString() }
-            : c
-        )
-      );
-    }, 2000);
-  };
+//     setTimeout(() => {
+//       setCommandHistory((prev) =>
+//         prev.map((c) =>
+//           c.id === newCommand.id
+//             ? { ...c, status: "executed", response: "OK", executed_at: new Date().toISOString() }
+//             : c
+//         )
+//       );
+//     }, 2000);
+//   };
 
-  const handleCustomerFilterChange = (customerId: string) => {
-    setCustomerFilter(customerId);
-    setCurrentView("devices");
-  };
+//   const handleCustomerFilterChange = (customerId: string) => {
+//     setCustomerFilter(customerId);
+//     setCurrentView("devices");
+//   };
 
-  // Open a customer's detail panel
-  const handleCustomerSelect = (customer: Customer) => {
-    setSelectedCustomer(customer);
-    setCurrentView("customers");
-    setSelectedDevice(null);
-  };
+//   // Open a customer's detail panel
+//   const handleCustomerSelect = (customer: Customer) => {
+//     setSelectedCustomer(customer);
+//     setCurrentView("customers");
+//     setSelectedDevice(null);
+//   };
 
-  // Called when CustomerDetail saves changes
-  const handleCustomerUpdated = (updated: Customer) => {
-    setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
-    setSelectedCustomer(updated);
-  };
+//   // Called when CustomerDetail saves changes
+//   const handleCustomerUpdated = (updated: Customer) => {
+//     setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
+//     setSelectedCustomer(updated);
+//   };
 
-  // Show loading state
-  if (loading && devices.length === 0) {
-    return (
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100vh",
-        background: "#1a1a1a",
-        color: "#e0e0e0",
-        fontFamily: "'JetBrains Mono', monospace",
-      }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{
-            border: "3px solid #333",
-            borderTop: "3px solid #00c853",
-            borderRadius: "50%",
-            width: "50px",
-            height: "50px",
-            animation: "spin 1s linear infinite",
-            margin: "0 auto 20px",
-          }}></div>
-          <div>Loading data from database...</div>
-        </div>
-      </div>
-    );
-  }
+//   // Show loading state
+//   if (loading && devices.length === 0) {
+//     return (
+//       <div style={{
+//         display: "flex",
+//         alignItems: "center",
+//         justifyContent: "center",
+//         height: "100vh",
+//         background: "#1a1a1a",
+//         color: "#e0e0e0",
+//         fontFamily: "'JetBrains Mono', monospace",
+//       }}>
+//         <div style={{ textAlign: "center" }}>
+//           <div style={{
+//             border: "3px solid #333",
+//             borderTop: "3px solid #00c853",
+//             borderRadius: "50%",
+//             width: "50px",
+//             height: "50px",
+//             animation: "spin 1s linear infinite",
+//             margin: "0 auto 20px",
+//           }}></div>
+//           <div>Loading data from database...</div>
+//         </div>
+//       </div>
+//     );
+//   }
 
-  // Show error state
-  if (error) {
-    return (
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        height: "100vh",
-        background: "#1a1a1a",
-        color: "#ef4444",
-        fontFamily: "'JetBrains Mono', monospace",
-      }}>
-        <div style={{ textAlign: "center", maxWidth: "500px", padding: "20px" }}>
-          <div style={{ fontSize: "48px", marginBottom: "20px" }}>⚠️</div>
-          <div style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "10px" }}>
-            Database Connection Error
-          </div>
-          <div style={{ fontSize: "14px", color: "#94a3b8", marginBottom: "20px" }}>
-            {error}
-          </div>
-          <div style={{ fontSize: "12px", color: "#6b7280" }}>
-            Check your .env.local file and ensure PostgreSQL is running
-          </div>
-          <button
-            onClick={() => window.location.reload()}
-            style={{
-              marginTop: "20px",
-              padding: "10px 20px",
-              background: "#00c853",
-              color: "#000",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontFamily: "inherit",
-              fontWeight: "bold",
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+//   // Show error state
+//   if (error) {
+//     return (
+//       <div style={{
+//         display: "flex",
+//         alignItems: "center",
+//         justifyContent: "center",
+//         height: "100vh",
+//         background: "#1a1a1a",
+//         color: "#ef4444",
+//         fontFamily: "'JetBrains Mono', monospace",
+//       }}>
+//         <div style={{ textAlign: "center", maxWidth: "500px", padding: "20px" }}>
+//           <div style={{ fontSize: "48px", marginBottom: "20px" }}>⚠️</div>
+//           <div style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "10px" }}>
+//             Database Connection Error
+//           </div>
+//           <div style={{ fontSize: "14px", color: "#94a3b8", marginBottom: "20px" }}>
+//             {error}
+//           </div>
+//           <div style={{ fontSize: "12px", color: "#6b7280" }}>
+//             Check your .env.local file and ensure PostgreSQL is running
+//           </div>
+//           <button
+//             onClick={() => window.location.reload()}
+//             style={{
+//               marginTop: "20px",
+//               padding: "10px 20px",
+//               background: "#00c853",
+//               color: "#000",
+//               border: "none",
+//               borderRadius: "6px",
+//               cursor: "pointer",
+//               fontFamily: "inherit",
+//               fontWeight: "bold",
+//             }}
+//           >
+//             Retry
+//           </button>
+//         </div>
+//       </div>
+//     );
+//   }
 
-  return (
-    <div
-      style={{
-        display: "flex",
-        height: "100vh",
-        width: "100vw",
-        background: "#1a1a1a",
-        color: "#e0e0e0",
-        fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace",
-        fontSize: "13px",
-        overflow: "hidden",
-      }}
-    >
-      {/* Sidebar */}
-      <Sidebar
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-        currentView={currentView}
-        onViewChange={(view) => {
-          setCurrentView(view);
-          setSelectedDevice(null);
-          setSelectedCustomer(null);
-        }}
-        customers={customers}
-        customerFilter={customerFilter}
-        onCustomerFilterChange={handleCustomerFilterChange}
-        selectedCustomerId={selectedCustomer?.id}
-        onCustomerSelect={handleCustomerSelect}
-        customerCount={customers.length}
-        deviceCount={deviceCount.length}
-      />
+//   return (
+//     <div
+//       style={{
+//         display: "flex",
+//         height: "100vh",
+//         width: "100vw",
+//         background: "#1a1a1a",
+//         color: "#e0e0e0",
+//         fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace",
+//         fontSize: "13px",
+//         overflow: "hidden",
+//       }}
+//     >
+//       {/* Sidebar */}
+//       <Sidebar
+//         isOpen={sidebarOpen}
+//         onToggle={() => setSidebarOpen(!sidebarOpen)}
+//         currentView={currentView}
+//         onViewChange={(view) => {
+//           setCurrentView(view);
+//           setSelectedDevice(null);
+//           setSelectedCustomer(null);
+//         }}
+//         customers={customers}
+//         customerFilter={customerFilter}
+//         onCustomerFilterChange={handleCustomerFilterChange}
+//         selectedCustomerId={selectedCustomer?.id}
+//         onCustomerSelect={handleCustomerSelect}
+//         customerCount={customers.length}
+//         deviceCount={deviceCount.length}
+//       />
 
-      {/* Main content */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Top bar */}
-        <TopBar
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          selectedDevice={selectedDevice}
-          currentView={currentView}
-          customerFilter={customerFilter}
-          onCustomerFilterChange={handleCustomerFilterChange}
-          customers={customers}
-          deviceCount={filteredDevices.length}
-          // selectedCustomer={selectedCustomer}
-        />
+//       {/* Main content */}
+//       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+//         {/* Top bar */}
+//         <TopBar
+//           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+//           selectedDevice={selectedDevice}
+//           currentView={currentView}
+//           customerFilter={customerFilter}
+//           onCustomerFilterChange={handleCustomerFilterChange}
+//           customers={customers}
+//           deviceCount={filteredDevices.length}
+//           // selectedCustomer={selectedCustomer}
+//         />
 
-        {/* Content area */}
-        <div style={{ flex: 1, overflow: "auto" }}>
-          {/* Device List View */}
-          {currentView === "devices" && !selectedDevice && (
-            <DeviceList
-              devices={filteredDevices}
-              customers={customers}
-              onDeviceSelect={handleDeviceSelect}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-            />
-          )}
+//         {/* Content area */}
+//         <div style={{ flex: 1, overflow: "auto" }}>
+//           {/* Device List View */}
+//           {currentView === "devices" && !selectedDevice && (
+//             <DeviceList
+//               devices={filteredDevices}
+//               customers={customers}
+//               onDeviceSelect={handleDeviceSelect}
+//               searchQuery={searchQuery}
+//               onSearchChange={setSearchQuery}
+//             />
+//           )}
 
-          {/* Device Detail View */}
-          {selectedDevice && (
-            <DeviceDetail
-              device={selectedDevice}
-              onClose={handleCloseDevice}
-              customers={customers}
-              telemetry={telemetryData}
-              commands={commandHistory}
-              onSendCommand={handleSendCommand}
-              lastUpdate={lastUpdate}
-              onDeviceDeleted={handleDeviceDeleted}
-              onDeviceUpdated={handleDeviceUpdated}
-            />
-          )}
+//           {/* Device Detail View */}
+//           {selectedDevice && (
+//             <DeviceDetail
+//               device={selectedDevice}
+//               onClose={handleCloseDevice}
+//               customers={customers}
+//               telemetry={telemetryData}
+//               commands={commandHistory}
+//               onSendCommand={handleSendCommand}
+//               lastUpdate={lastUpdate}
+//               onDeviceDeleted={handleDeviceDeleted}
+//               onDeviceUpdated={handleDeviceUpdated}
+//             />
+//           )}
 
-          {/* Customer Detail View — shown when a specific customer is selected */}
-          {currentView === "customers" && selectedCustomer && !selectedDevice && (
-            <CustomerDetail
-              customer={selectedCustomer}
-              allCustomers={customers}
-              onBack={() => {
-                setSelectedCustomer(null);
-              }}
-              onCustomerUpdated={handleCustomerUpdated}
-              onDeviceSelect={(device) => {
-                setSelectedDevice(device);
-              }}
-            />
-          )}
+//           {/* Customer Detail View — shown when a specific customer is selected */}
+//           {currentView === "customers" && selectedCustomer && !selectedDevice && (
+//             <CustomerDetail
+//               customer={selectedCustomer}
+//               allCustomers={customers}
+//               onBack={() => {
+//                 setSelectedCustomer(null);
+//               }}
+//               onCustomerUpdated={handleCustomerUpdated}
+//               onDeviceSelect={(device) => {
+//                 setSelectedDevice(device);
+//               }}
+//             />
+//           )}
 
-          {/* Customer List View — shown when no specific customer selected */}
-          {currentView === "customers" && !selectedCustomer && !selectedDevice && (
-            <CustomerList
-              customers={customers}
-              devices={devices}
-              onSelectCustomer={(id) => {
-                const c = customers.find(x => x.id === id);
-                if (c) handleCustomerSelect(c);
-              }}
-              onAddCustomer={() => setShowCustomerModal(true)}
-            />
-          )}
-        </div>
-      </div>
+//           {/* Customer List View — shown when no specific customer selected */}
+//           {currentView === "customers" && !selectedCustomer && !selectedDevice && (
+//             <CustomerList
+//               customers={customers}
+//               devices={devices}
+//               onSelectCustomer={(id) => {
+//                 const c = customers.find(x => x.id === id);
+//                 if (c) handleCustomerSelect(c);
+//               }}
+//               onAddCustomer={() => setShowCustomerModal(true)}
+//             />
+//           )}
+//         </div>
+//       </div>
 
-      {/* Add Customer Modal */}
-      <AddCustomerModal
-        isOpen={showCustomerModal}
-        onClose={() => setShowCustomerModal(false)}
-        customers={customers}
-        onCustomerCreated={(newCustomer) => {
-          setCustomers(prev => [...prev, newCustomer]);
-        }}
-      />
-    </div>
-  );
+//       {/* Add Customer Modal */}
+//       <AddCustomerModal
+//         isOpen={showCustomerModal}
+//         onClose={() => setShowCustomerModal(false)}
+//         customers={customers}
+//         onCustomerCreated={(newCustomer) => {
+//           setCustomers(prev => [...prev, newCustomer]);
+//         }}
+//       />
+//     </div>
+//   );
+// }
+import { redirect } from "next/navigation";
+
+export default function Home() {
+  redirect("/login");
 }
