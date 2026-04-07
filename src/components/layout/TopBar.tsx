@@ -4,6 +4,7 @@ import React from "react";
 import { Icons } from "@/components/ui/Icons";
 import { Device, Customer } from "@/types";
 import { THEME } from "@/lib/theme";
+import { signOut } from "next-auth/react";
 
 interface TopBarProps {
   onToggleSidebar: () => void;
@@ -44,7 +45,7 @@ export function TopBar({
       <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
         {/* <Icons.Menu /> */}
         {/* <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span> */}
-        
+
         {currentView === "devices" && (
           <>
             <span style={{ fontSize: 14, fontWeight: 600, color: THEME.text.primary }}>
@@ -60,13 +61,13 @@ export function TopBar({
             )}
           </>
         )}
-        
+
         {currentView === "customers" && (
           <span style={{ fontSize: 14, fontWeight: 600, color: THEME.text.primary }}>
             Customers
           </span>
         )}
-        
+
         {selectedDevice && (
           <>
             <span style={{ color: THEME.text.tertiary, fontSize: 14 }}>/</span>
@@ -132,7 +133,7 @@ export function TopBar({
         </div> */}
 
         {/* User Profile */}
-        <div
+        {/* <div
           style={{
             width: 36,
             height: 36,
@@ -149,6 +150,33 @@ export function TopBar({
           }}
         >
           SA
+        </div> */}
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            style={{
+              padding: "6px 14px",
+              background: "transparent",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              color: "#666",
+              fontSize: 12,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontWeight: 600,
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "#ef4444";
+              e.currentTarget.style.color = "#ef4444";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "#e0e0e0";
+              e.currentTarget.style.color = "#666";
+            }}
+          >
+            Sign Out
+          </button>
         </div>
       </div>
     </div>
