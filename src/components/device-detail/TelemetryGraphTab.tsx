@@ -31,6 +31,7 @@ export function TelemetryGraphTab({ device }: TelemetryGraphTabProps) {
     // { key: "gnss.satellites.count", label: "Satellites", unit: "", color: "#f44336", transform: (v: number) => v },
     { key: "external.powersource.voltage", label: "External Voltage", unit: "V", color: "#4caf50", transform: (v: number) => v / 1000 },
     { key: "battery.voltage", label: "Battery Voltage", unit: "V", color: "#ffeb3b", transform: (v: number) => v / 1000 },
+    { key: "can.fuel.rate", label: "Fuel Rate", unit: "l/h", color: "#ff5722", transform: (v: number) => v / 10 },
     // { key: "gsm.signal.level", label: "GSM Signal", unit: "%", color: "#00bcd4", transform: (v: number) => v },
   ];
 

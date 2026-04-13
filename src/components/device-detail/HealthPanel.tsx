@@ -107,14 +107,14 @@ function computeAlarms(
   // Only evaluate alarms when Din.1 = true (genset is ON)
   // Exception: abnormal current with DG OFF is always checked
   if (din1 === 0 && ain1A !== null && ain1A > 2)
-    alarms.push({ id: "abnormal_current_no_dg", severity: "critical", message: "Abnormal: current detected but DG set is OFF", action: "Contact Saarthi Support immediately" });
+    alarms.push({ id: "abnormal_current_no_dg", severity: "critical", message: `Abnormal: current detected but ${model === "EOW" ? "engine" : "DG set"} is OFF`, action: "Contact Saarthi Support immediately" });
 
   if (din1 === 1) {
     if (dout1 === 1)
       alarms.push({ id: "remote_shutdown", severity: "warning", message: "System remotely shutdown — maintenance mode active", action: "Check with maintenance team before restarting" });
 
     if (ain1A !== null && ain1A < 2 && dout1 === 0)
-      alarms.push({ id: "abnormal_no_current", severity: "critical", message: "Abnormal: DG set is ON but no output current", action: "Contact Saarthi Support immediately" });
+      alarms.push({ id: "abnormal_no_current", severity: "critical", message: `Abnormal: ${model === "EOW" ? "engine" : "DG set"} is ON but no output current`, action: "Contact Saarthi Support immediately" });
 
     if (isRunning && ain2 !== null && ain2 < 2 && dout1 === 0 && din2 === 0)
       alarms.push({ id: "electrolyser_water_short", severity: "critical", message: "Internal electrolyser water shortage detected", action: "Contact Saarthi Support immediately" });
@@ -305,7 +305,7 @@ export function GreenXHealthPanel({ deviceType, deviceModel, telemetry }: GreenX
             <SignalRow
               label="System running"
               detail="Din.1 = ON & Ain.1 > 2 A"
-              status={isRunning ? "Running" : din1 === 1 ? "DG ON — no output" : "Stopped"}
+              status={isRunning ? "Running" : din1 === 1 ? `${eowLabel} ON — no output` : "Stopped"}
               ok={isRunning ? true : din1 === null ? null : false}
               stale={din1 !== 1}
             />

@@ -151,6 +151,7 @@ const FMC650_ONLY: Record<number, IOParam> = {
   51:  { name: "dout.4",                           category: "digital" },
   // PCB temperature
   70:  { name: "pcb.temperature",                  unit: "°C",  category: "temperature", multiplier: 0.1 },
+  108:  { name: "custom.param.108",                category: "system"},
   // SIM / identity (FMC650 IDs differ from FMB150)
   144: { name: "sd.card.status",                   category: "system" },
   178: { name: "network.type",                     category: "system" },

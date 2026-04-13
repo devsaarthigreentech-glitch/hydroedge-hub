@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       FROM io_records
       WHERE device_id = $1
         AND timestamp > NOW() - INTERVAL '${hours} hours'
+        AND NOT (io_id = 18 AND io_value >= 65535)
       ORDER BY timestamp ASC
     `;
 
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest) {
       67: 'battery.voltage',
       68: 'battery.current',
       21: 'gsm.signal.level',
+      18: 'can.fuel.rate'
     };
 
     result.rows.forEach((row) => {
