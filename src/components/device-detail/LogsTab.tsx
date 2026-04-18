@@ -833,31 +833,32 @@ import { THEME } from "@/lib/theme";
 
 // ── Hardcoded common IO parameters ──────────────────────────────────────────
 
-const COMMON_PARAMS: { io_id: number; name: string; unit: string }[] = [
+const COMMON_PARAMS: { io_id: number; name: string; unit: string; multiplier?: number }[] = [
   { io_id: 216, name: "vehicle.mileage", unit: "m" },
-  { io_id: 16,  name: "total.odometer", unit: "m" },
-  { io_id: 9,   name: "ain.1", unit: "V" },
-  { io_id: 10,  name: "ain.2", unit: "V" },
-  { io_id: 11,  name: "ain.3", unit: "V" },
-  { io_id: 245, name: "ain.4", unit: "V" },
+  { io_id: 16, name: "total.odometer", unit: "m" },
+  { io_id: 18, name: "can.fuel.rate", unit: "l/hr", multiplier: 0.1 },
+  { io_id: 9, name: "ain.1", unit: "V", multiplier: 0.001 },
+  { io_id: 10, name: "ain.2", unit: "V", multiplier: 0.001 },
+  { io_id: 11, name: "ain.3", unit: "V", multiplier: 0.001 },
+  { io_id: 245, name: "ain.4", unit: "V", multiplier: 0.001 },
   { io_id: 179, name: "dout.1", unit: "" },
   { io_id: 180, name: "dout.2", unit: "" },
-  { io_id: 1,   name: "din.1", unit: "" },
-  { io_id: 2,   name: "din.2", unit: "" },
-  { io_id: 3,   name: "din.3", unit: "" },
-  { io_id: 67,  name: "battery.voltage", unit: "V" },
-  { io_id: 66,  name: "external.voltage", unit: "V" },
-  { io_id: 68,  name: "battery.current", unit: "mA" },
-  { io_id: 12,  name: "fuel.used.gps", unit: "l" },
-  { io_id: 13,  name: "fuel.rate.gps", unit: "l/100km" },
-  { io_id: 34,  name: "can.fuel.level.liters", unit: "l" },
-  { io_id: 35,  name: "can.engine.rpm", unit: "rpm" },
-  { io_id: 36,  name: "can.tracker.counted.mileage", unit: "m" },
-  { io_id: 24,  name: "vehicle.speed", unit: "km/h" },
+  { io_id: 1, name: "din.1", unit: "" },
+  { io_id: 2, name: "din.2", unit: "" },
+  { io_id: 3, name: "din.3", unit: "" },
+  { io_id: 67, name: "battery.voltage", unit: "V", multiplier: 0.001 },
+  { io_id: 66, name: "external.voltage", unit: "V", multiplier: 0.001 },
+  { io_id: 68, name: "battery.current", unit: "mA" },
+  { io_id: 12, name: "fuel.used.gps", unit: "l", multiplier: 0.001 },
+  { io_id: 13, name: "fuel.rate.gps", unit: "l/100km", multiplier: 0.01 },
+  { io_id: 34, name: "can.fuel.level.liters", unit: "l", multiplier: 0.1 },
+  { io_id: 35, name: "can.engine.rpm", unit: "rpm" },
+  { io_id: 36, name: "can.tracker.counted.mileage", unit: "m" },
+  { io_id: 24, name: "vehicle.speed", unit: "km/h" },
   { io_id: 239, name: "ignition.status", unit: "" },
   { io_id: 240, name: "movement.status", unit: "" },
   { io_id: 199, name: "trip.odometer", unit: "m" },
-  { io_id: 21,  name: "gsm.signal.level", unit: "%" },
+  { io_id: 21, name: "gsm.signal.level", unit: "%" },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -926,12 +927,23 @@ export function LogsTab({ device }: LogsTabProps) {
   const [showParamDropdown, setShowParamDropdown] = useState(false);
   const [paramSearch, setParamSearch] = useState("");
 
+  const [minFilter, setMinFilter] = useState("");
+  const [maxFilter, setMaxFilter] = useState("");
+
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [queryInfo, setQueryInfo] = useState<{ count: number; time: number } | null>(null);
 
   const getParam = (ioId: number) => COMMON_PARAMS.find((p) => p.io_id === ioId);
+
+  const formatValue = (ioId: number, raw: string): string => {
+    const p = getParam(ioId);
+    if (!p?.multiplier) return raw;
+    const num = parseFloat(raw);
+    if (isNaN(num)) return raw;
+    return parseFloat((num * p.multiplier).toFixed(3)).toString();
+  };
 
   const toggleIOId = (ioId: number) => {
     setSelectedIOIds((prev) => {
@@ -964,11 +976,32 @@ export function LogsTab({ device }: LogsTabProps) {
     const t0 = performance.now();
 
     try {
+      // const params = new URLSearchParams({
+      //   io_ids: selectedIOIds.join(","),
+      //   start: startUTC,
+      //   end: endUTC,
+      // });
+
       const params = new URLSearchParams({
         io_ids: selectedIOIds.join(","),
         start: startUTC,
         end: endUTC,
       });
+      if (minFilter.trim() || maxFilter.trim()) {
+        // If only one IO param selected and it has a multiplier, convert back to raw
+        const multiplier = selectedIOIds.length === 1
+          ? (getParam(selectedIOIds[0])?.multiplier || 1)
+          : 1;
+
+        if (minFilter.trim()) {
+          const rawMin = parseFloat(minFilter) / multiplier;
+          params.set('min', rawMin.toString());
+        }
+        if (maxFilter.trim()) {
+          const rawMax = parseFloat(maxFilter) / multiplier;
+          params.set('max', rawMax.toString());
+        }
+      }
 
       const res = await fetch(`/api/io-logs/${device.id}?${params}`);
       const data = await res.json();
@@ -985,7 +1018,7 @@ export function LogsTab({ device }: LogsTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [device.id, selectedDate, startTime, endTime, selectedIOIds]);
+  }, [device.id, selectedDate, startTime, endTime, selectedIOIds, minFilter, maxFilter]);
 
   const filteredParams = COMMON_PARAMS.filter((p) => {
     if (!paramSearch) return true;
@@ -1006,6 +1039,111 @@ export function LogsTab({ device }: LogsTabProps) {
       </div>
 
       {/* Filter Card */}
+      {/* <div
+        style={{
+          background: "white",
+          borderRadius: 12,
+          border: `2px solid ${THEME.border.light}`,
+          padding: 24,
+          marginBottom: 20,
+          boxShadow: THEME.shadow.sm,
+        }}
+      > */}
+        {/* Date + Time */}
+        {/* <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 180px", minWidth: 160 }}>
+            <label style={labelStyle}>Date</label>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              max={todayDate()}
+              style={inputStyle}
+            />
+          </div> */}
+
+          {/* Value Filters */}
+          {/* <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 180px", minWidth: 140 }}>
+              <label style={labelStyle}>
+                Min Value
+                <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+              </label>
+              <input
+                type="number"
+                value={minFilter}
+                onChange={(e) => setMinFilter(e.target.value)}
+                placeholder="e.g. 5000"
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ flex: "1 1 180px", minWidth: 140 }}>
+              <label style={labelStyle}>
+                Max Value
+                <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+              </label>
+              <input
+                type="number"
+                value={maxFilter}
+                onChange={(e) => setMaxFilter(e.target.value)}
+                placeholder="e.g. 65000"
+                style={inputStyle}
+              />
+            </div> */}
+            {/* <div style={{ flex: "2 1 200px", minWidth: 160, display: "flex", alignItems: "flex-end" }}> */}
+              {/* Value Filters */}
+              {/* <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 180px", minWidth: 140 }}>
+                  <label style={labelStyle}>
+                    Min Value
+                    <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={minFilter}
+                    onChange={(e) => setMinFilter(e.target.value)}
+                    placeholder="e.g. 5000"
+                    style={inputStyle}
+                  />
+                </div>
+                <div style={{ flex: "1 1 180px", minWidth: 140 }}>
+                  <label style={labelStyle}>
+                    Max Value
+                    <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={maxFilter}
+                    onChange={(e) => setMaxFilter(e.target.value)}
+                    placeholder="e.g. 65000"
+                    style={inputStyle}
+                  />
+                </div>
+                <div style={{ flex: "2 1 200px", minWidth: 160, display: "flex", alignItems: "flex-end" }}>
+                  <div style={{
+                    fontSize: 11, color: THEME.text.tertiary, padding: "10px 0", lineHeight: 1.5,
+                  }}>
+                    Filters apply to <strong style={{ color: THEME.text.secondary }}>raw values</strong> from the database.
+                    {selectedIOIds.length === 1 && getParam(selectedIOIds[0])?.multiplier && (
+                      <span> For {getParam(selectedIOIds[0])?.name}, raw value = display × {(1 / (getParam(selectedIOIds[0])?.multiplier || 1)).toFixed(0)}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div> */}
+
+          {/* <div style={{ flex: "1 1 140px", minWidth: 120 }}>
+            <label style={labelStyle}>From Time (IST)</label>
+            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: "1 1 140px", minWidth: 120 }}>
+            <label style={labelStyle}>To Time (IST)</label>
+            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
+          </div>
+        </div> */}
+
+        {/* Filter Card */}
       <div
         style={{
           background: "white",
@@ -1016,7 +1154,7 @@ export function LogsTab({ device }: LogsTabProps) {
           boxShadow: THEME.shadow.sm,
         }}
       >
-        {/* Date + Time */}
+        {/* Row 1: Date + Time */}
         <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 180px", minWidth: 160 }}>
             <label style={labelStyle}>Date</label>
@@ -1037,6 +1175,48 @@ export function LogsTab({ device }: LogsTabProps) {
             <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
           </div>
         </div>
+
+        {/* Row 2: Value Filters */}
+        <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 180px", minWidth: 140 }}>
+            <label style={labelStyle}>
+              Min Value
+              <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+            </label>
+            <input
+              type="number"
+              value={minFilter}
+              onChange={(e) => setMinFilter(e.target.value)}
+              placeholder="e.g. 5"
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ flex: "1 1 180px", minWidth: 140 }}>
+            <label style={labelStyle}>
+              Max Value
+              <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+            </label>
+            <input
+              type="number"
+              value={maxFilter}
+              onChange={(e) => setMaxFilter(e.target.value)}
+              placeholder="e.g. 65"
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ flex: "2 1 200px", minWidth: 160, display: "flex", alignItems: "flex-end" }}>
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, padding: "10px 0", lineHeight: 1.5 }}>
+              {selectedIOIds.length === 1 && getParam(selectedIOIds[0])?.unit
+                ? <>Enter values in <strong style={{ color: THEME.text.secondary }}>{getParam(selectedIOIds[0])?.unit}</strong> — e.g. &quot;{getParam(selectedIOIds[0])?.name} &gt; 5 {getParam(selectedIOIds[0])?.unit}&quot;</>
+                : selectedIOIds.length > 1
+                ? <>With multiple parameters, filters apply without unit conversion</>
+                : <>Select a parameter first, then set filter values</>
+              }
+            </div>
+          </div>
+        </div>
+
+        {/* Row 3: IO Parameter Selector */}
 
         {/* IO Parameter Selector */}
         <div style={{ marginBottom: 20 }}>
@@ -1343,7 +1523,7 @@ export function LogsTab({ device }: LogsTabProps) {
                           fontFamily: "JetBrains Mono, monospace",
                           fontSize: 13, fontWeight: 700, color: THEME.text.primary,
                         }}>
-                          {rec.io_value}
+                          {formatValue(rec.io_id, rec.io_value)}
                           {p?.unit && (
                             <span style={{ marginLeft: 4, fontSize: 11, fontWeight: 400, color: THEME.text.tertiary }}>
                               {p.unit}

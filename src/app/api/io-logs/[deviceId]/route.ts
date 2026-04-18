@@ -150,7 +150,24 @@ export async function GET(
       );
     }
 
-    const sql = `
+    // const sql = `
+    //   SELECT io_id, io_value, timestamp
+    //   FROM io_records
+    //   WHERE device_id = $1
+    //     AND io_id = ANY($2::int[])
+    //     AND timestamp >= $3
+    //     AND timestamp <= $4
+    //     AND timestamp > '2025-01-01'
+    //   ORDER BY timestamp DESC
+    //   LIMIT 1000
+    // `;
+
+    // const result = await query(sql, [deviceId, ioIds, startTime, endTime]);
+
+    const minVal = searchParams.get('min');
+    const maxVal = searchParams.get('max');
+
+    let sql = `
       SELECT io_id, io_value, timestamp
       FROM io_records
       WHERE device_id = $1
@@ -158,11 +175,26 @@ export async function GET(
         AND timestamp >= $3
         AND timestamp <= $4
         AND timestamp > '2025-01-01'
-      ORDER BY timestamp DESC
-      LIMIT 1000
     `;
 
-    const result = await query(sql, [deviceId, ioIds, startTime, endTime]);
+    const sqlParams: any[] = [deviceId, ioIds, startTime, endTime];
+    let paramIdx = 5;
+
+    if (minVal !== null && minVal !== '') {
+      sql += ` AND io_value::numeric >= $${paramIdx}`;
+      sqlParams.push(parseFloat(minVal));
+      paramIdx++;
+    }
+
+    if (maxVal !== null && maxVal !== '') {
+      sql += ` AND io_value::numeric <= $${paramIdx}`;
+      sqlParams.push(parseFloat(maxVal));
+      paramIdx++;
+    }
+
+    sql += ` ORDER BY timestamp DESC LIMIT 1000`;
+
+    const result = await query(sql, sqlParams);
 
     return NextResponse.json({
       success: true,
