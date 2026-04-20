@@ -43,6 +43,8 @@ interface IdleSummary {
   estimated_fuel_wasted_litres: number;
   estimated_co2_wasted_kg: number;
   avg_idle_duration_min: number;
+  idle_fuel_rate_lph?: number;
+  idle_fuel_rate_source?: "can_bus" | "estimate";
 }
 interface DailyIdle {
   day: string;
@@ -391,6 +393,45 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
     return () => document.removeEventListener("mousedown", h);
   }, [calendarOpen]);
 
+  // const fetchFuel = useCallback(async () => {
+  //   setFuelLoading(true); setError(null);
+  //   try {
+  //     let url: string;
+  //     if (customMode && startDate && endDate) {
+  //       const s = encodeURIComponent(toISTIso(startDate, startTime));
+  //       const e = encodeURIComponent(toISTIso(endDate, endTime));
+  //       url = `/api/analytics?device_id=${device.id}&start_datetime=${s}&end_datetime=${e}`;
+  //     } else {
+  //       url = `/api/analytics?device_id=${device.id}&days=${days}`;
+  //     }
+  //     const res = await fetch(url);
+  //     const data = await res.json();
+  //     if(data.success){setDailyData(data.data);setSummary(data.summary);}
+  //     else setError(data.error);
+  //   } catch { setError("Failed to fetch fuel data"); }
+  //   finally { setFuelLoading(false); }
+  // }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
+
+  // const fetchTrips = useCallback(async () => {
+  //   setTripsLoading(true);
+  //   try {
+  //     const res = await fetch(`/api/analytics/trips?device_id=${device.id}&days=${days}`);
+  //     const data = await res.json();
+  //     if(data.success){setTrips(data.trips);setTripSummary(data.summary);}
+  //   } catch {}
+  //   finally { setTripsLoading(false); }
+  // }, [device.id, days]);
+
+  // const fetchIdle = useCallback(async () => {
+  //   setIdleLoading(true);
+  //   try {
+  //     const res = await fetch(`/api/analytics/idle?device_id=${device.id}&days=${days}`);
+  //     const data = await res.json();
+  //     if(data.success){setIdleSummary(data.summary);setDailyIdle(data.daily);}
+  //   } catch {}
+  //   finally { setIdleLoading(false); }
+  // }, [device.id, days]);
+
   const fetchFuel = useCallback(async () => {
     setFuelLoading(true); setError(null);
     try {
@@ -404,35 +445,52 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
       }
       const res = await fetch(url);
       const data = await res.json();
-      if(data.success){setDailyData(data.data);setSummary(data.summary);}
+      if(data.success){setDailyData(data.data ?? []);setSummary(data.summary ?? null);}
       else setError(data.error);
     } catch { setError("Failed to fetch fuel data"); }
     finally { setFuelLoading(false); }
   }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
-
+  
   const fetchTrips = useCallback(async () => {
     setTripsLoading(true);
     try {
       const res = await fetch(`/api/analytics/trips?device_id=${device.id}&days=${days}`);
       const data = await res.json();
-      if(data.success){setTrips(data.trips);setTripSummary(data.summary);}
+      if(data.success){setTrips(data.trips ?? []);setTripSummary(data.summary ?? null);}
     } catch {}
     finally { setTripsLoading(false); }
   }, [device.id, days]);
-
+  
   const fetchIdle = useCallback(async () => {
     setIdleLoading(true);
     try {
-      const res = await fetch(`/api/analytics/idle?device_id=${device.id}&days=${days}`);
+      let url: string;
+      if (customMode && startDate && endDate) {
+        const s = encodeURIComponent(toISTIso(startDate, startTime));
+        const e = encodeURIComponent(toISTIso(endDate, endTime));
+        url = `/api/analytics/idle?device_id=${device.id}&start_datetime=${s}&end_datetime=${e}`;
+      } else {
+        url = `/api/analytics/idle?device_id=${device.id}&days=${days}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
-      if(data.success){setIdleSummary(data.summary);setDailyIdle(data.daily);}
+      if(data.success){setIdleSummary(data.summary ?? null);setDailyIdle(data.daily ?? []);}
     } catch {}
     finally { setIdleLoading(false); }
+  }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
+
+  // useEffect(() => { if(!customMode) fetchFuel(); fetchTrips(); fetchIdle(); }, [device.id, days]);
+  // useEffect(() => { if(customMode&&startDate&&endDate) fetchFuel(); }, [customMode,startDate,startTime,endDate,endTime,device.id]);
+  
+  useEffect(() => {
+    if (!customMode) { fetchFuel(); fetchIdle(); }
+    fetchTrips();
   }, [device.id, days]);
-
-  useEffect(() => { if(!customMode) fetchFuel(); fetchTrips(); fetchIdle(); }, [device.id, days]);
-  useEffect(() => { if(customMode&&startDate&&endDate) fetchFuel(); }, [customMode,startDate,startTime,endDate,endTime,device.id]);
-
+  
+  useEffect(() => {
+    if (customMode && startDate && endDate) { fetchFuel(); fetchIdle(); }
+  }, [customMode, startDate, startTime, endDate, endTime, device.id]);
+  
   const handleConfirm = (sd:string, st:string, ed:string, et:string) => {
     setStartDate(sd); setStartTime(st); setEndDate(ed); setEndTime(et); setCustomMode(true);
   };
@@ -731,8 +789,11 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
               sub={`${idleSummary.total_idle_events} idle events`} color="#dc2626" bg="#fef2f2"/>
             <StatCard icon="📊" label="Avg Idle Duration" value={formatDuration(idleSummary.avg_idle_duration_min)}
               sub="Per idle event" color="#f59e0b" bg="#fffbeb"/>
-            <StatCard icon="⛽" label="Fuel Wasted (est.)" value={`${idleSummary.estimated_fuel_wasted_litres} L`}
-              sub="@ 0.8 L/h idle rate" color="#ea580c" bg="#fff7ed"/>
+<StatCard icon="⛽" label="Fuel Wasted (est.)" value={`${idleSummary.estimated_fuel_wasted_litres} L`}
+  sub={idleSummary.idle_fuel_rate_source === "can_bus"
+    ? `@ ${idleSummary.idle_fuel_rate_lph} L/h (CAN bus)`
+    : `@ ${idleSummary.idle_fuel_rate_lph ?? 0.8} L/h idle rate (est.)`}
+  color="#ea580c" bg="#fff7ed"/>
             <StatCard icon="🌫️" label="CO₂ from Idling" value={`${idleSummary.estimated_co2_wasted_kg} kg`}
               sub="Preventable emissions" color="#7c3aed" bg="#f5f3ff"/>
           </div>
