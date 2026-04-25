@@ -516,7 +516,7 @@ export async function GET(request: NextRequest) {
 
         const distanceMeters = parseFloat(String(mileage?.daily_distance_meters ?? 0));
         // +3% correction factor
-        const distance = parseFloat(((distanceMeters / 1000) * 1.03).toFixed(2));
+        const distance = parseFloat(((distanceMeters / 1000)).toFixed(2));
 
         // Prefer CAN fuel rate method when available (FMB150 with io_id=18 data).
         // Fall back to fuel-level-drop method (io_id=107) otherwise.
