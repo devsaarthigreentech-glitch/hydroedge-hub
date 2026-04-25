@@ -379,6 +379,10 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   const [baselineInput, setBaselineInput] = useState("10");
   const baselineRef = useRef<HTMLInputElement>(null);
 
+  const windowSub = customMode && startDate && endDate
+  ? formatDatetimeLabel(startDate, startTime, endDate, endTime)
+  : `${days}D window`;
+
   useEffect(() => {
     const saved = localStorage.getItem(`baseline_kmpl_${device.id}`);
     if (saved) { const v=parseFloat(saved); if(!isNaN(v)&&v>0){setBaselineKmpl(v);setBaselineInput(v.toString());} }
@@ -451,16 +455,37 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
     finally { setFuelLoading(false); }
   }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
   
+  // const fetchTrips = useCallback(async () => {
+  //   setTripsLoading(true);
+  //   try {
+  //     const res = await fetch(`/api/analytics/trips?device_id=${device.id}&days=${days}`);
+  //     const data = await res.json();
+  //     if(data.success){setTrips(data.trips ?? []);setTripSummary(data.summary ?? null);}
+  //   } catch {}
+  //   finally { setTripsLoading(false); }
+  // }, [device.id, days]);
+  
   const fetchTrips = useCallback(async () => {
     setTripsLoading(true);
     try {
-      const res = await fetch(`/api/analytics/trips?device_id=${device.id}&days=${days}`);
+      let url: string;
+      if (customMode && startDate && endDate) {
+        const s = encodeURIComponent(toISTIso(startDate, startTime));
+        const e = encodeURIComponent(toISTIso(endDate, endTime));
+        url = `/api/analytics/trips?device_id=${device.id}&start_datetime=${s}&end_datetime=${e}`;
+      } else {
+        url = `/api/analytics/trips?device_id=${device.id}&days=${days}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
-      if(data.success){setTrips(data.trips ?? []);setTripSummary(data.summary ?? null);}
+      if (data.success) {
+        setTrips(data.trips ?? []);
+        setTripSummary(data.summary ?? null);
+      }
     } catch {}
     finally { setTripsLoading(false); }
-  }, [device.id, days]);
-  
+  }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
+
   const fetchIdle = useCallback(async () => {
     setIdleLoading(true);
     try {
@@ -483,12 +508,12 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   // useEffect(() => { if(customMode&&startDate&&endDate) fetchFuel(); }, [customMode,startDate,startTime,endDate,endTime,device.id]);
   
   useEffect(() => {
-    if (!customMode) { fetchFuel(); fetchIdle(); }
-    fetchTrips();
+    if (!customMode) { fetchFuel(); fetchIdle(); fetchTrips(); }
+    
   }, [device.id, days]);
   
   useEffect(() => {
-    if (customMode && startDate && endDate) { fetchFuel(); fetchIdle(); }
+    if (customMode && startDate && endDate) { fetchFuel(); fetchIdle(); fetchTrips();}
   }, [customMode, startDate, startTime, endDate, endTime, device.id]);
   
   const handleConfirm = (sd:string, st:string, ed:string, et:string) => {
@@ -732,7 +757,7 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
         <>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:16}}>
             <StatCard icon="🚗" label="Total Trips" value={`${tripSummary.total_trips}`}
-              sub={`${days}D window`} color="#8b5cf6" bg="#f5f3ff"/>
+              sub={windowSub} color="#8b5cf6" bg="#f5f3ff"/>
             <StatCard icon="📍" label="GPS Distance" value={`${tripSummary.total_distance_km} km`}
               sub="Haversine calculated" color={THEME.primary[500]} bg={THEME.primary[50]}/>
             <StatCard icon="⏱️" label="Total Drive Time" value={formatDuration(tripSummary.total_duration_min)}
