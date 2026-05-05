@@ -535,7 +535,12 @@ export function CustomerDetail({
           />
         )}
         {activeTab === "sub-customers" && (
-          <CustomerSubTab subCustomers={subCustomers} allCustomers={allCustomers} />
+          <CustomerSubTab subCustomers={subCustomers} allCustomers={allCustomers} onSelectCustomer={(sub) => {
+            onBack();  // go back from current customer
+            // small delay so the parent state clears, then select the sub-customer
+            setTimeout(() => onCustomerUpdated(sub), 50);
+          }}
+          />
         )}
       </div>
     </div>

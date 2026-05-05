@@ -5,21 +5,28 @@ import { Device, TelemetryParameter } from "@/types";
 import { THEME } from "@/lib/theme";
 import { timeAgo, formatTimestamp } from "@/lib/utils";
 import { GreenXHealthPanel } from "./HealthPanel";
+import { filterTelemetry } from "@/lib/telemetry-permissions";
 
 interface TelemetryTabProps {
   telemetry: TelemetryParameter[];
   lastUpdate?: string;
   device?: Device;
+  customerType?: string;
 }
 
-export function TelemetryTab({ telemetry, lastUpdate, device }: TelemetryTabProps) {
+export function TelemetryTab({ telemetry, lastUpdate, device,customerType }: TelemetryTabProps) {
+  // Filter telemetry by customer type + device type
+  const visibleTelemetry = device
+    ? filterTelemetry(telemetry as any[], device.device_type, customerType)
+    : telemetry;
+
   const [filter, setFilter] = useState<"all" | "system" | "sensor">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const systemParams = telemetry.filter((p) => p.type === "system" || p.category === "system");
-  const sensorParams = telemetry.filter((p) => p.type === "sensor" || (p.type !== "system" && p.category !== "system"));
+  const systemParams = visibleTelemetry.filter((p) => p.type === "system" || p.category === "system");
+  const sensorParams = visibleTelemetry.filter((p) => p.type === "sensor" || (p.type !== "system" && p.category !== "system"));
 
-  let filteredParams = telemetry;
+  let filteredParams = visibleTelemetry;
   if (filter === "system") filteredParams = systemParams;
   if (filter === "sensor") filteredParams = sensorParams;
 
@@ -116,7 +123,7 @@ export function TelemetryTab({ telemetry, lastUpdate, device }: TelemetryTabProp
       {/* Filters */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         {(["all", "system", "sensor"] as const).map((f) => {
-          const count = f === "all" ? telemetry.length : f === "system" ? systemParams.length : sensorParams.length;
+          const count = f === "all" ? visibleTelemetry.length : f === "system" ? systemParams.length : sensorParams.length;
           const label = f.charAt(0).toUpperCase() + f.slice(1);
           const activeColor = f === "all" ? THEME.primary[500] : f === "system" ? THEME.secondary[500] : THEME.accent[500];
           const isActive = filter === f;

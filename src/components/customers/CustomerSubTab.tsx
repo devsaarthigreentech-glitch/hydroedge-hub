@@ -5,12 +5,13 @@ import { Customer } from "@/types";
 interface Props {
   subCustomers: Customer[];
   allCustomers: Customer[];
+  onSelectCustomer?: (customer: Customer) => void;
 }
 
 const BORDER = "#e2e8f0";
-const GREEN  = "#22c55e";
+const GREEN = "#22c55e";
 
-export function CustomerSubTab({ subCustomers, allCustomers }: Props) {
+export function CustomerSubTab({ subCustomers, allCustomers, onSelectCustomer }: Props) {
   if (subCustomers.length === 0) {
     return (
       <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>
@@ -36,6 +37,7 @@ export function CustomerSubTab({ subCustomers, allCustomers }: Props) {
         return (
           <div
             key={sub.id}
+            onClick={() => onSelectCustomer?.(sub)}
             style={{
               display: "flex",
               alignItems: "center",
@@ -45,6 +47,16 @@ export function CustomerSubTab({ subCustomers, allCustomers }: Props) {
               border: `1px solid ${BORDER}`,
               borderRadius: 10,
               marginBottom: 10,
+              cursor: "pointer",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = GREEN;
+              e.currentTarget.style.background = "#f0fdf4";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = BORDER;
+              e.currentTarget.style.background = "#fff";
             }}
           >
             {/* Avatar */}

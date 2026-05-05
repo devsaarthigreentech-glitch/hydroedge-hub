@@ -163,6 +163,8 @@ const FMC650_ONLY: Record<number, IOParam> = {
   113: { name: "fms.service.distance",             unit: "km",  category: "can" },
   449: { name: "ignition.on.duration",             unit: "s",   category: "vehicle" },
   10009: { name: "eco.score",                      category: "driving", multiplier: 0.01 },
+
+  250:{name: "trip.status" , category: "system" }
 };
 
 // ─── Build device-specific map using EXACT device_type strings from DB ────────

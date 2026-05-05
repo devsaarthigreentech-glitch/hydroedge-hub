@@ -29,6 +29,8 @@ export interface Customer {
 }
 
 export interface Device {
+  is_online: boolean;
+  last_seen: any;
   id: string; // UUID
   imei: string;
   device_name?: string;
@@ -102,7 +104,7 @@ export interface IORecord {
 }
 
 // UI State Types
-export type ViewType = "devices" | "customers" | "telemetry" | "settings";
+export type ViewType = "devices" | "customers" | "telemetry" | "settings" | "users";
 export type DeviceTab = "info" | "edit" | "telemetry" | "graphs" | "commands" | "logs" | "config" | "settings" | "map" | "analytics";
 
 export interface AppState {

@@ -18,7 +18,7 @@ export const authOptions: NextAuthOptions = {
         const result = await pool.query(
           `SELECT u.id, u.username, u.email, u.full_name, u.password_hash, 
                   u.role, u.customer_id, u.is_active,
-                  c.name AS customer_name, c.hierarchy_level, 
+                  c.name AS customer_name, c.hierarchy_level, c.customer_type,
                   c.parent_customer_id, c.hide_from_grandparent
            FROM users u
            LEFT JOIN customers c ON c.id = u.customer_id
@@ -47,6 +47,7 @@ export const authOptions: NextAuthOptions = {
           role: user.role,
           customerId: user.customer_id,
           customerName: user.customer_name,
+          customerType: user.customer_type,
           hierarchyLevel: user.hierarchy_level ?? 0,
         };
       },
@@ -59,6 +60,7 @@ export const authOptions: NextAuthOptions = {
         token.role = (user as any).role;
         token.customerId = (user as any).customerId;
         token.customerName = (user as any).customerName;
+        token.customerType = (user as any).customerType;
         token.hierarchyLevel = (user as any).hierarchyLevel;
       }
       return token;
@@ -69,6 +71,7 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).role = token.role;
         (session.user as any).customerId = token.customerId;
         (session.user as any).customerName = token.customerName;
+        (session.user as any).customerType = token.customerType;
         (session.user as any).hierarchyLevel = token.hierarchyLevel;
       }
       return session;

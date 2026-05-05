@@ -1,236 +1,3 @@
-// // // src/app/portal/page.tsx
-// // "use client";
-
-// // import { useSession, signOut } from "next-auth/react";
-// // import { useState, useEffect } from "react";
-// // import { InfoTab } from "../device-detail/InfoTab";
-// // import { AnalyticsTab } from "../device-detail/AnalyticsTab";
-// // import { TelemetryTab } from "../device-detail/TelemetryTab";
-// // // import TelemetryTab from "";
-// // // import AnalyticsTab from "@/components/AnalyticsTab";
-// // // import InfoTab from "@/components/InfoTab";
-// // // import VisibilitySettings from "@/components/VisibilitySettings";
-
-// // interface Device {
-// //   id: string;
-// //   imei: string;
-// //   device_name: string;
-// //   device_type: string;
-// //   asset_name: string;
-// //   asset_type: string;
-// //   status: string;
-// //   connection_status: string;
-// //   last_latitude: number;
-// //   last_longitude: number;
-// //   last_location_time: string;
-// //   access_level: string;
-// // }
-
-// // interface CustomerGroup {
-// //   customer_name: string;
-// //   hierarchy_depth: number;
-// //   devices: Device[];
-// // }
-
-// // type TabType = "telemetry" | "analytics" | "info";
-
-// // export default function PortalPage() {
-// //   const { data: session } = useSession();
-// //   const [groups, setGroups] = useState<CustomerGroup[]>([]);
-// //   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
-// //   const [activeTab, setActiveTab] = useState<TabType>("telemetry");
-// //   const [loading, setLoading] = useState(true);
-// //   const [sidebarOpen, setSidebarOpen] = useState(true);
-// //   const [showSettings, setShowSettings] = useState(false);
-
-// //   const user = session?.user as any;
-
-// //   useEffect(() => {
-// //     fetchDevices();
-// //   }, []);
-
-// //   const fetchDevices = async () => {
-// //     setLoading(true);
-// //     try {
-// //       const res = await fetch("/api/customer/devices");
-// //       const data = await res.json();
-// //       setGroups(data.customers || []);
-// //       // Auto-select first device
-// //       if (data.customers?.[0]?.devices?.[0]) {
-// //         setSelectedDevice(data.customers[0].devices[0]);
-// //       }
-// //     } catch (err) {
-// //       console.error("Failed to fetch devices:", err);
-// //     }
-// //     setLoading(false);
-// //   };
-
-// //   const tabs: { key: TabType; label: string; icon: string }[] = [
-// //     { key: "telemetry", label: "Telemetry", icon: "📡" },
-// //     { key: "analytics", label: "Analytics", icon: "📊" },
-// //     { key: "info", label: "Info", icon: "ℹ️" },
-// //   ];
-
-// //   const statusColor = (s: string) =>
-// //     s === "online" ? "bg-emerald-500" : "bg-slate-600";
-
-// //   return (
-// //     <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-// //       {/* Top bar */}
-// //       <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 shrink-0">
-// //         <div className="flex items-center gap-3">
-// //           <button
-// //             onClick={() => setSidebarOpen(!sidebarOpen)}
-// //             className="text-slate-400 hover:text-white p-1"
-// //           >
-// //             ☰
-// //           </button>
-// //           <h1 className="text-lg font-semibold">
-// //             Hydroedge<span className="text-emerald-400"> Hub</span>
-// //           </h1>
-// //         </div>
-// //         <div className="flex items-center gap-4">
-// //           <button
-// //             onClick={() => setShowSettings(!showSettings)}
-// //             className="text-slate-400 hover:text-white text-sm"
-// //             title="Visibility Settings"
-// //           >
-// //             ⚙️ Settings
-// //           </button>
-// //           <span className="text-sm text-slate-400">
-// //             {user?.customerName || user?.name}
-// //           </span>
-// //           <button
-// //             onClick={() => signOut({ callbackUrl: "/login" })}
-// //             className="text-sm text-slate-400 hover:text-red-400 transition"
-// //           >
-// //             Sign Out
-// //           </button>
-// //         </div>
-// //       </header>
-
-// //       {/* Settings modal */}
-// //       {showSettings && (
-// //         <VisibilitySettings onClose={() => setShowSettings(false)} />
-// //       )}
-
-// //       <div className="flex flex-1 overflow-hidden">
-// //         {/* Sidebar - Device list grouped by customer */}
-// //         {sidebarOpen && (
-// //           <aside className="w-72 bg-slate-900 border-r border-slate-800 overflow-y-auto shrink-0">
-// //             <div className="p-3">
-// //               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-// //                 Devices
-// //               </h2>
-
-// //               {loading ? (
-// //                 <p className="text-slate-500 text-sm p-2">Loading...</p>
-// //               ) : groups.length === 0 ? (
-// //                 <p className="text-slate-500 text-sm p-2">No devices found</p>
-// //               ) : (
-// //                 groups.map((group) => (
-// //                   <div key={group.customer_name} className="mb-4">
-// //                     <div className="flex items-center gap-2 mb-1.5 px-2">
-// //                       <span className="text-xs font-medium text-slate-400">
-// //                         {group.customer_name}
-// //                       </span>
-// //                       {group.hierarchy_depth > 0 && (
-// //                         <span className="text-[10px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded">
-// //                           L{group.hierarchy_depth}
-// //                         </span>
-// //                       )}
-// //                     </div>
-// //                     {group.devices.map((device) => (
-// //                       <button
-// //                         key={device.id}
-// //                         onClick={() => setSelectedDevice(device)}
-// //                         className={`w-full text-left px-3 py-2 rounded-lg mb-0.5 transition text-sm ${
-// //                           selectedDevice?.id === device.id
-// //                             ? "bg-emerald-600/20 border border-emerald-600/40"
-// //                             : "hover:bg-slate-800"
-// //                         }`}
-// //                       >
-// //                         <div className="flex items-center gap-2">
-// //                           <span
-// //                             className={`w-2 h-2 rounded-full ${statusColor(device.connection_status)}`}
-// //                           />
-// //                           <span className="font-medium truncate">
-// //                             {device.asset_name || device.device_name || device.imei}
-// //                           </span>
-// //                         </div>
-// //                         <div className="text-xs text-slate-500 ml-4 mt-0.5">
-// //                           {device.imei}
-// //                           {device.asset_type && ` · ${device.asset_type}`}
-// //                         </div>
-// //                       </button>
-// //                     ))}
-// //                   </div>
-// //                 ))
-// //               )}
-// //             </div>
-// //           </aside>
-// //         )}
-
-// //         {/* Main content */}
-// //         <main className="flex-1 flex flex-col overflow-hidden">
-// //           {selectedDevice ? (
-// //             <>
-// //               {/* Device header + tabs */}
-// //               <div className="border-b border-slate-800 bg-slate-900/50 px-6 pt-4">
-// //                 <div className="flex items-center gap-3 mb-3">
-// //                   <span
-// //                     className={`w-3 h-3 rounded-full ${statusColor(selectedDevice.connection_status)}`}
-// //                   />
-// //                   <h2 className="text-lg font-semibold">
-// //                     {selectedDevice.asset_name ||
-// //                       selectedDevice.device_name ||
-// //                       selectedDevice.imei}
-// //                   </h2>
-// //                   <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">
-// //                     {selectedDevice.imei}
-// //                   </span>
-// //                 </div>
-
-// //                 {/* Tab bar */}
-// //                 <div className="flex gap-1">
-// //                   {tabs.map((tab) => (
-// //                     <button
-// //                       key={tab.key}
-// //                       onClick={() => setActiveTab(tab.key)}
-// //                       className={`px-4 py-2 text-sm font-medium rounded-t-lg transition ${
-// //                         activeTab === tab.key
-// //                           ? "bg-slate-950 text-emerald-400 border-t-2 border-emerald-400"
-// //                           : "text-slate-400 hover:text-white hover:bg-slate-800/50"
-// //                       }`}
-// //                     >
-// //                       {tab.icon} {tab.label}
-// //                     </button>
-// //                   ))}
-// //                 </div>
-// //               </div>
-
-// //               {/* Tab content */}
-// //               <div className="flex-1 overflow-y-auto p-6">
-// //                 {activeTab === "telemetry" && (
-// //                   <TelemetryTab device={selectedDevice} />
-// //                 )}
-// //                 {activeTab === "analytics" && (
-// //                   <AnalyticsTab device={selectedDevice} />
-// //                 )}
-// //                 {activeTab === "info" && <InfoTab device={selectedDevice} />}
-// //               </div>
-// //             </>
-// //           ) : (
-// //             <div className="flex-1 flex items-center justify-center text-slate-600">
-// //               Select a device from the sidebar
-// //             </div>
-// //           )}
-// //         </main>
-// //       </div>
-// //     </div>
-// //   );
-// // }
-
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -245,6 +12,10 @@ import { filterDevices } from "@/lib/utils";
 import { Device, Customer, ViewType, Command } from "@/types";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { UserList } from "@/components/users/UserList";
+import { AddUserModal } from "@/components/users/AddUserModal";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { THEME } from "@/lib/theme";
 
 export default function PortalPage() {
   const { status } = useSession();
@@ -267,6 +38,11 @@ useEffect(() => {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string | undefined>(undefined);
 
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [userCount, setUserCount] = useState(0);
+
+  const isMobile = useIsMobile();
+
   // Real data from API
   const [devices, setDevices] = useState<Device[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -282,6 +58,18 @@ useEffect(() => {
     setDevices(prev => prev.map(d => d.id === updatedDevice.id ? { ...d, ...updatedDevice } : d));
     setSelectedDevice(prev => prev ? { ...prev, ...updatedDevice } : null);
   };
+
+  useEffect(() => {
+    fetch('/api/users').then(r => r.json()).then(d => {
+      if (d.success) setUserCount(d.total);
+    });
+  }, []);
+
+  const { data: session } = useSession();
+  const user = session?.user as any;
+  const customerType = (user?.role === 'super_admin')
+    ? undefined
+    : (user?.customerType || 'customer');
 
   // Fetch customers from database
   useEffect(() => {
@@ -482,8 +270,8 @@ useEffect(() => {
         display: "flex",
         height: "100vh",
         width: "100vw",
-        background: "#1a1a1a",
-        color: "#e0e0e0",
+        background: THEME.background.primary,
+        color: THEME.text.primary,
         fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace",
         fontSize: "13px",
         overflow: "hidden",
@@ -506,6 +294,8 @@ useEffect(() => {
         onCustomerSelect={handleCustomerSelect}
         customerCount={customers.length}
         deviceCount={deviceCount.length}
+        userCount={userCount}
+        isMobile={isMobile}
       />
 
       {/* Main content */}
@@ -520,6 +310,7 @@ useEffect(() => {
           customers={customers}
           deviceCount={filteredDevices.length}
           // selectedCustomer={selectedCustomer}
+          isMobile={isMobile}
         />
 
         {/* Content area */}
@@ -532,6 +323,7 @@ useEffect(() => {
               onDeviceSelect={handleDeviceSelect}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
+              isMobile={isMobile}
             />
           )}
 
@@ -547,6 +339,7 @@ useEffect(() => {
               lastUpdate={lastUpdate}
               onDeviceDeleted={handleDeviceDeleted}
               onDeviceUpdated={handleDeviceUpdated}
+              customerType={customerType}
             />
           )}
 
@@ -577,6 +370,14 @@ useEffect(() => {
               onAddCustomer={() => setShowCustomerModal(true)}
             />
           )}
+
+          {/* User List View */}
+{currentView === "users" && (
+  <UserList
+    customers={customers}
+    onAddUser={() => setShowUserModal(true)}
+  />
+)}
         </div>
       </div>
 
@@ -589,6 +390,16 @@ useEffect(() => {
           setCustomers(prev => [...prev, newCustomer]);
         }}
       />
+
+<AddUserModal
+  isOpen={showUserModal}
+  onClose={() => setShowUserModal(false)}
+  customers={customers}
+  onUserCreated={() => {
+    setShowUserModal(false);
+    // UserList fetches its own data, so no state to update
+  }}
+/>
     </div>
   );
 }
