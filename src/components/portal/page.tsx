@@ -67,7 +67,7 @@ useEffect(() => {
 
   const { data: session } = useSession();
   const user = session?.user as any;
-  const customerType = (user?.role === 'super_admin')
+  const customerType = (user?.role === 'super_admin' || user?.role === 'admin')
     ? undefined
     : (user?.customerType || 'customer');
 
