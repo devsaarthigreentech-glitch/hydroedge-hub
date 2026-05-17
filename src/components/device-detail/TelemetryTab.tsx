@@ -111,10 +111,11 @@ export function TelemetryTab({ telemetry, lastUpdate, device,customerType }: Tel
           deviceId={device.id}
           deviceType={device.device_type}
           deviceModel={
-            device.asset_name === "EOW" ? "EOW" :
-              device.device_name?.includes("1500") ? "1500KVA" :
-                device.device_name?.includes("625") ? "625KVA" :
-                  "380KVA"
+            device.device_name?.includes("1500") ? "1500KVA" :
+            device.device_name?.includes("625")  ? "625KVA"  :
+            device.asset_name === "EOW" ? "EOW"  :  // ← check asset before device type
+            device.device_type === "FMB150"      ? "MINI"    :
+            "380KVA"
           }
           telemetry={telemetry}
         />

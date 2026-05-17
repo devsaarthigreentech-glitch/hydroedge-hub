@@ -121,7 +121,7 @@ export async function DELETE(
         const deviceId = resolved.deviceId;
   
       const sql = `
-        DELETE FROMd devices
+        DELETE FROM devices
         WHERE id = $1
         RETURNING id, device_name, imei
       `;

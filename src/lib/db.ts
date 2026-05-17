@@ -1,69 +1,146 @@
-// // ============================================================================
-// // DATABASE CONNECTION - PostgreSQL Client
-// // ============================================================================
+// // // ============================================================================
+// // // DATABASE CONNECTION - PostgreSQL Client
+// // // ============================================================================
 
+// // import { Pool } from 'pg';
+
+// // // Database configuration from environment variables
+// // const pool = new Pool({
+// //   host: process.env.DB_HOST || 'localhost',
+// //   port: parseInt(process.env.DB_PORT || '5432'),
+// //   database: process.env.DB_NAME || 'gps_tracking',
+// //   user: process.env.DB_USER || 'postgres',
+// //   password: process.env.DB_PASSWORD,
+// //   max: 20, // Maximum pool size
+// //   idleTimeoutMillis: 30000,
+// //   connectionTimeoutMillis: 2000,
+// // });
+
+// // // Test connection
+// // pool.on('connect', () => {
+// //   console.log('✅ Connected to PostgreSQL database');
+// // });
+
+// // pool.on('error', (err) => {
+// //   console.error('❌ Unexpected database error:', err);
+// // });
+
+// // // Query helper function
+// // export async function query(text: string, params?: any[]) {
+// //   const start = Date.now();
+// //   try {
+// //     const res = await pool.query(text, params);
+// //     const duration = Date.now() - start;
+// //     console.log('Executed query', { text, duration, rows: res.rowCount });
+// //     return res;
+// //   } catch (error) {
+// //     console.error('Database query error:', error);
+// //     throw error;
+// //   }
+// // }
+
+// // // Get a client from the pool (for transactions)
+// // export async function getClient() {
+// //   const client = await pool.connect();
+// //   return client;
+// // }
+
+// // export default pool;
 // import { Pool } from 'pg';
 
-// // Database configuration from environment variables
-// const pool = new Pool({
+// // ① Singleton: store the pool on globalThis so hot-reload reuses it
+// const globalForPg = globalThis as unknown as { pgPool: Pool | undefined };
+
+// // ② Only create a new Pool if one doesn't already exist
+// const pool = globalForPg.pgPool ?? new Pool({
 //   host: process.env.DB_HOST || 'localhost',
 //   port: parseInt(process.env.DB_PORT || '5432'),
-//   database: process.env.DB_NAME || 'gps_tracking',
+//   database: process.env.DB_NAME || 'sgt_hydroedge',  // ③ fixed default
 //   user: process.env.DB_USER || 'postgres',
 //   password: process.env.DB_PASSWORD,
-//   max: 20, // Maximum pool size
-//   idleTimeoutMillis: 30000,
+//   max: 10,                    // ④ reduced: you don't need 20
+//   idleTimeoutMillis: 10000,   // ⑤ close idle connections after 10s
 //   connectionTimeoutMillis: 2000,
 // });
 
-// // Test connection
-// pool.on('connect', () => {
-//   console.log('✅ Connected to PostgreSQL database');
-// });
+// // ⑥ In development, save pool to globalThis so next hot-reload finds it
+// if (process.env.NODE_ENV !== 'production') {
+//   globalForPg.pgPool = pool;
+// }
 
 // pool.on('error', (err) => {
 //   console.error('❌ Unexpected database error:', err);
 // });
 
-// // Query helper function
+// // ⑦ Removed verbose query logging for production
 // export async function query(text: string, params?: any[]) {
-//   const start = Date.now();
-//   try {
-//     const res = await pool.query(text, params);
-//     const duration = Date.now() - start;
-//     console.log('Executed query', { text, duration, rows: res.rowCount });
-//     return res;
-//   } catch (error) {
-//     console.error('Database query error:', error);
-//     throw error;
-//   }
+//   return pool.query(text, params);
 // }
 
-// // Get a client from the pool (for transactions)
 // export async function getClient() {
-//   const client = await pool.connect();
-//   return client;
+//   return pool.connect();
 // }
 
 // export default pool;
+// ============================================================================
+// DATABASE CONNECTION - PostgreSQL Client
+// ----------------------------------------------------------------------------
+// v2: Hardened pool with TCP keepalive + server-side timeouts.
+//
+// Why these settings matter:
+//   - max: 10                              cap so we never starve the Python pool
+//   - idleTimeoutMillis: 10s               idle pruning keeps the pool small
+//   - connectionTimeoutMillis: 5s          fail fast under load instead of queuing
+//   - keepAlive: true (+ initial 30s)      kernel detects dead PG backends in ~80s
+//   - statement_timeout: 15s               runaway query can't permanently hold a conn
+//   - query_timeout: 15s                   client-side mirror of statement_timeout
+//   - idle_in_transaction_session_timeout  PG kills stuck transactions in 30s
+// ============================================================================
+
 import { Pool } from 'pg';
 
-// ① Singleton: store the pool on globalThis so hot-reload reuses it
+// Singleton: store the pool on globalThis so Next.js hot-reload reuses it
+// instead of leaking a new pool on every code change.
 const globalForPg = globalThis as unknown as { pgPool: Pool | undefined };
 
-// ② Only create a new Pool if one doesn't already exist
-const pool = globalForPg.pgPool ?? new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'sgt_hydroedge',  // ③ fixed default
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD,
-  max: 10,                    // ④ reduced: you don't need 20
-  idleTimeoutMillis: 10000,   // ⑤ close idle connections after 10s
-  connectionTimeoutMillis: 2000,
-});
+const pool =
+  globalForPg.pgPool ??
+  new Pool({
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: process.env.DB_NAME || 'sgt_hydroedge',
+    user: process.env.DB_USER || 'postgres',
+    password: process.env.DB_PASSWORD,
 
-// ⑥ In development, save pool to globalThis so next hot-reload finds it
+    // ----- Pool sizing -----
+    // Total PG backends = (this) + Python pool max (10) + admin/migrations overhead.
+    // Keep this well below PostgreSQL's max_connections (you have 100, can raise to 200).
+    max: 10,
+
+    // Close pooled connections that sit unused for 10s.
+    idleTimeoutMillis: 10_000,
+
+    // Fail fast if pool is exhausted instead of queuing forever.
+    connectionTimeoutMillis: 5_000,
+
+    // ----- TCP keepalive -----
+    // Without this, the OS waits ~2 hours before noticing a dead PG backend.
+    // With it, dead backends are reaped in ~80s.
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 30_000,
+
+    // ----- Server-side safety nets -----
+    // Any query running longer than 15s is killed automatically.
+    statement_timeout: 15_000,
+    query_timeout: 15_000,
+
+    // A transaction that's been idle for 30s gets killed — prevents stuck
+    // transactions from holding row locks forever.
+    idle_in_transaction_session_timeout: 30_000,
+  });
+
+  pool.setMaxListeners(50);
+
 if (process.env.NODE_ENV !== 'production') {
   globalForPg.pgPool = pool;
 }
@@ -72,11 +149,13 @@ pool.on('error', (err) => {
   console.error('❌ Unexpected database error:', err);
 });
 
-// ⑦ Removed verbose query logging for production
+// Query helper for simple statements.
 export async function query(text: string, params?: any[]) {
   return pool.query(text, params);
 }
 
+// Get a dedicated client for transactions.
+// Caller is responsible for client.release() in a finally block.
 export async function getClient() {
   return pool.connect();
 }
