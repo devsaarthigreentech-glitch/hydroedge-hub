@@ -846,6 +846,7 @@ const COMMON_PARAMS: { io_id: number; name: string; unit: string; multiplier?: n
   { io_id: 1, name: "din.1", unit: "" },
   { io_id: 2, name: "din.2", unit: "" },
   { io_id: 3, name: "din.3", unit: "" },
+  { io_id: 4, name: "din.4", unit: "" },
   { io_id: 67, name: "battery.voltage", unit: "V", multiplier: 0.001 },
   { io_id: 66, name: "external.voltage", unit: "V", multiplier: 0.001 },
   { io_id: 68, name: "battery.current", unit: "mA" },
