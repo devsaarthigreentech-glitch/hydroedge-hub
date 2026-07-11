@@ -36,6 +36,7 @@ export interface Device {
   device_name?: string;
   device_type: string;
   manufacturer: string;
+  protocol?: "teltonika" | "nano";
   status: DeviceStatus;
   connection_status: ConnectionStatus;
   customer_id: string; // UUID

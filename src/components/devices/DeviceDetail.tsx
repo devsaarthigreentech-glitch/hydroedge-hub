@@ -255,6 +255,7 @@ import { AnalyticsTab } from "../device-detail/AnalyticsTab";
 import { TeltonikaConfigurator } from "../device-detail/TeltonikaConfigurator";
 import { getAllowedTabs } from "@/lib/tab-permissions";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { NanoDeviceDetail } from "./NanoDeviceDetail";
 
 interface DeviceDetailProps {
   device: Device;
@@ -303,6 +304,10 @@ export function DeviceDetail({
   const visibleTabs = customerType
     ? tabs.filter((tab) => getAllowedTabs(customerType).includes(tab.key))
     : tabs;
+  
+    if (device.protocol === "nano") {
+      return <NanoDeviceDetail device={device} onClose={onClose} customers={customers} customerType={customerType} />;
+    }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

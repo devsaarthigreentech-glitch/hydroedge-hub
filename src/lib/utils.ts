@@ -102,8 +102,8 @@ export const filterDevices = (
   return devices.filter((d) => {
     const matchesSearch =
       !searchQuery ||
-      d.device_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.imei.includes(searchQuery);
+      (d.device_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (d.imei || "").includes(searchQuery);
     const matchesCustomer =
       customerFilter === "all" || d.customer_id === customerFilter;
     return matchesSearch && matchesCustomer;
