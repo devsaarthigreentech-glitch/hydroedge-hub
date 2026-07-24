@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
+// ── Auto-naming series switch ───────────────────────────────────────────
+// Set to true to re-enable the Tested-gated auto-naming/locking behavior
+// (SGT-XX-MMYY-####). While false, device_name is taken directly from the
+// client (manual entry) and the gate below never fires, regardless of
+// tested/customer/asset state.
+//
+// Before flipping back to true: since names are being assigned manually
+// right now, first advance each sequence past your latest manually-used
+// number so numbering continues correctly, e.g.:
+//   SELECT setval('device_seq_gx', <last GX number you used manually>);
+//   SELECT setval('device_seq_gd', <last GD number you used manually>);
+//   SELECT setval('device_seq_mr', <last GM number you used manually>);
+//   SELECT setval('device_seq_in', <last GI number you used manually>);
+const AUTO_NAME_ASSIGNMENT_ENABLED = false;
+
 // Fixed, hard-coded whitelist — never built from user input.
 const ASSET_CODE_MAP: Record<string, { code: string; sequence: string }> = {
     EOW: { code: "GD", sequence: "device_seq_gd" },
@@ -17,13 +32,10 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        // NOTE: device_name is intentionally NOT accepted from the client anymore.
-        // It is fully server-generated once the naming conditions are met, and
-        // locked permanently after that. Any device_name sent by the client is ignored.
-        const { device_type, asset_name, sim_number, customer_id, notes, tested } = body;
+        const { device_name, device_type, asset_name, sim_number, customer_id, notes, tested } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
-        // including cases where only one of customer/asset/tested changes this call.
+        // and to know name_locked even while the gate is paused.
         const currentResult = await query(
             `SELECT customer_id, asset_name, tested, name_locked, device_name
              FROM devices WHERE id = $1 AND deleted_at IS NULL`,
@@ -43,11 +55,33 @@ export async function PATCH(
         const values = [];
         let paramCount = 1;
 
+        // Manual device_name entry — active while auto-naming is paused.
+        if (device_name !== undefined) {
+            if (!device_name.trim()) {
+                return NextResponse.json(
+                    { success: false, error: 'Device name cannot be empty' },
+                    { status: 400 }
+                );
+            }
+            if (device_name.length > 100) {
+                return NextResponse.json(
+                    { success: false, error: 'Device name is too long (max 100 characters)' },
+                    { status: 400 }
+                );
+            }
+        }
+
         if (notes !== undefined && notes !== null && notes.length > 2000) {
             return NextResponse.json(
                 { success: false, error: 'Notes are too long (max 2000 characters)' },
                 { status: 400 }
             );
+        }
+
+        if (!AUTO_NAME_ASSIGNMENT_ENABLED && device_name !== undefined) {
+            updates.push(`device_name = $${paramCount}`);
+            values.push(device_name);
+            paramCount++;
         }
 
         if(device_type !== undefined){
@@ -80,9 +114,9 @@ export async function PATCH(
             paramCount++;
         }
 
-        // ── Naming gate ──────────────────────────────────────────────
-        // Only fires the very first time all three conditions are true
-        // for a device whose name isn't locked yet. After that, name_locked
+        // ── Naming gate (currently PAUSED — see AUTO_NAME_ASSIGNMENT_ENABLED) ──
+        // When re-enabled: fires the very first time all three conditions are
+        // true for a device whose name isn't locked yet. After that, name_locked
         // permanently blocks any further renaming, no matter what changes.
         const effectiveCustomerId = customer_id !== undefined ? customer_id : current.customer_id;
         const effectiveAssetName = asset_name !== undefined ? asset_name : current.asset_name;
@@ -91,6 +125,7 @@ export async function PATCH(
         let nameAssigned = false;
 
         if (
+            AUTO_NAME_ASSIGNMENT_ENABLED &&
             !current.name_locked &&
             effectiveTested === true &&
             effectiveCustomerId &&

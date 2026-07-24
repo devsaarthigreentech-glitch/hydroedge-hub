@@ -19,10 +19,9 @@ const ASSET_TYPES = [
   { value: "Industrial", label: "Industrial" },
 ];
 
-const DUMMY_NAME = "SGT-####";
-
 export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps) {
   const [formData, setFormData] = useState({
+    device_name: device.device_name,
     device_type: device.device_type,
     asset_name: device.asset_name || "",
     sim_number: device.sim_number || "",
@@ -41,6 +40,9 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
 
   const showHealthHint = formData.asset_name === "DG" || formData.asset_name === "EOW";
 
+  // Auto-naming feature is currently PAUSED (see AUTO_NAME_ASSIGNMENT_ENABLED in route.ts).
+  // Device Name is manually editable again. The Tested checkbox and locking UI below
+  // are kept in place, inert, so the feature can be re-enabled later without rebuilding it.
   const nameLocked = !!device.name_locked;
   const testedGateMet = !!formData.customer_id && !!formData.asset_name;
   const testedDisabled = nameLocked || !testedGateMet;
@@ -76,13 +78,14 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   const handleSave = async () => {
     setError("");
     setSuccess(false);
+    if (!formData.device_name?.trim()) { setError("Device name cannot be empty"); return; }
     setIsSaving(true);
     try {
       const response = await fetch(`/api/devices/${device.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // device_name is NOT sent — it's fully server-generated and locked
+          device_name: formData.device_name,
           device_type: formData.device_type,
           asset_name: formData.asset_name,
           sim_number: formData.sim_number,
@@ -135,19 +138,19 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
       {/* Form Card */}
       <div style={{ background: "white", borderRadius: 12, border: `2px solid ${THEME.border.light}`, padding: 24, maxWidth: 700, boxShadow: THEME.shadow.sm }}>
 
-        {/* Device Name — fully auto-generated & locked, never manually editable */}
+        {/* Device Name — editable while auto-naming is paused */}
         <div style={{ marginBottom: 20 }}>
           <label style={labelStyle}>Device Name</label>
           <input
             type="text"
-            value={nameLocked ? device.device_name : DUMMY_NAME}
-            disabled
-            style={{ ...inputStyle, background: THEME.neutral[50], color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace", cursor: "not-allowed", opacity: 0.7 }}
+            value={formData.device_name}
+            onChange={(e) => setFormData({ ...formData, device_name: e.target.value })}
+            style={inputStyle}
+            onFocus={focusStyle}
+            onBlur={blurStyle}
           />
-          <div style={{ fontSize: 11, color: nameLocked ? "#16a34a" : THEME.text.tertiary, marginTop: 6, fontWeight: nameLocked ? 600 : 400 }}>
-            {nameLocked
-              ? "🔒 Name is locked and cannot be changed"
-              : "Auto-assigned once Customer, Asset Type, and Tested are all set"}
+          <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+            Auto-naming is paused — enter the name manually for now
           </div>
         </div>
 
@@ -247,7 +250,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
           </select>
         </div>
 
-        {/* Tested — gates the auto-naming series */}
+        {/* Tested — kept in place for when auto-naming is re-enabled; inert for now */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: testedDisabled ? "not-allowed" : "pointer" }}>
             <input
@@ -262,7 +265,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
 
           {nameLocked ? (
             <div style={{ fontSize: 11, color: "#16a34a", marginTop: 6, fontWeight: 600 }}>
-              ✓ Tested — device name has been assigned and locked
+              ✓ Tested — device name is locked
             </div>
           ) : !testedGateMet ? (
             <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
@@ -270,7 +273,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             </div>
           ) : (
             <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
-              Checking this and saving will permanently assign the device name
+              Auto-naming is currently paused — this won't assign a name yet
             </div>
           )}
         </div>
