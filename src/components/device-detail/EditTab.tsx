@@ -19,14 +19,16 @@ const ASSET_TYPES = [
   { value: "Industrial", label: "Industrial" },
 ];
 
+const DUMMY_NAME = "SGT-####";
+
 export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps) {
   const [formData, setFormData] = useState({
-    device_name: device.device_name,
     device_type: device.device_type,
     asset_name: device.asset_name || "",
     sim_number: device.sim_number || "",
     customer_id: device.customer_id || "",
     notes: device.notes || "",
+    tested: device.tested || false,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -38,6 +40,10 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const showHealthHint = formData.asset_name === "DG" || formData.asset_name === "EOW";
+
+  const nameLocked = !!device.name_locked;
+  const testedGateMet = !!formData.customer_id && !!formData.asset_name;
+  const testedDisabled = nameLocked || !testedGateMet;
 
   const inputStyle: React.CSSProperties = {
     width: "100%", background: "white", border: `2px solid ${THEME.border.light}`,
@@ -70,25 +76,26 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   const handleSave = async () => {
     setError("");
     setSuccess(false);
-    if (!formData.device_name?.trim()) { setError("Device name cannot be empty"); return; }
     setIsSaving(true);
     try {
       const response = await fetch(`/api/devices/${device.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          device_name: formData.device_name,
+          // device_name is NOT sent — it's fully server-generated and locked
           device_type: formData.device_type,
           asset_name: formData.asset_name,
           sim_number: formData.sim_number,
           customer_id: formData.customer_id,
           notes: formData.notes,
+          tested: formData.tested,
         }),
       });
       const data = await response.json();
       if (response.ok && data.success) {
         setSuccess(true);
-        onSaved?.({ ...device, ...formData, ...(data.device || {}) });
+        // NOTE: route returns the updated row as `data.data`, not `data.device`
+        onSaved?.({ ...device, ...formData, ...(data.data || {}) });
         setTimeout(() => setSuccess(false), 3000);
       } else {
         setError(data.error || "Failed to update device");
@@ -128,17 +135,20 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
       {/* Form Card */}
       <div style={{ background: "white", borderRadius: 12, border: `2px solid ${THEME.border.light}`, padding: 24, maxWidth: 700, boxShadow: THEME.shadow.sm }}>
 
-        {/* Device Name */}
+        {/* Device Name — fully auto-generated & locked, never manually editable */}
         <div style={{ marginBottom: 20 }}>
           <label style={labelStyle}>Device Name</label>
           <input
             type="text"
-            value={formData.device_name}
-            onChange={(e) => setFormData({ ...formData, device_name: e.target.value })}
-            style={inputStyle}
-            onFocus={focusStyle}
-            onBlur={blurStyle}
+            value={nameLocked ? device.device_name : DUMMY_NAME}
+            disabled
+            style={{ ...inputStyle, background: THEME.neutral[50], color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace", cursor: "not-allowed", opacity: 0.7 }}
           />
+          <div style={{ fontSize: 11, color: nameLocked ? "#16a34a" : THEME.text.tertiary, marginTop: 6, fontWeight: nameLocked ? 600 : 400 }}>
+            {nameLocked
+              ? "🔒 Name is locked and cannot be changed"
+              : "Auto-assigned once Customer, Asset Type, and Tested are all set"}
+          </div>
         </div>
 
         {/* IMEI (read-only) */}
@@ -164,7 +174,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             onBlur={blurStyle}
           >
             <option value="FMB150">FMB150</option>
-            <option value="FMB120">FMB120</option>{/* NEW — required for GreenX FMB120 logic */}
+            <option value="FMB120">FMB120</option>
             <option value="FMC650">FMC650</option>
             <option value="FMB920">FMB920</option>
             <option value="FMB140">FMB140</option>
@@ -235,6 +245,34 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Tested — gates the auto-naming series */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: testedDisabled ? "not-allowed" : "pointer" }}>
+            <input
+              type="checkbox"
+              checked={formData.tested}
+              disabled={testedDisabled}
+              onChange={(e) => setFormData({ ...formData, tested: e.target.checked })}
+              style={{ width: 18, height: 18, cursor: testedDisabled ? "not-allowed" : "pointer" }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 600, color: THEME.text.primary }}>Tested</span>
+          </label>
+
+          {nameLocked ? (
+            <div style={{ fontSize: 11, color: "#16a34a", marginTop: 6, fontWeight: 600 }}>
+              ✓ Tested — device name has been assigned and locked
+            </div>
+          ) : !testedGateMet ? (
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+              Select a customer and asset type before marking as tested
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+              Checking this and saving will permanently assign the device name
+            </div>
+          )}
         </div>
 
         {/* Notes */}

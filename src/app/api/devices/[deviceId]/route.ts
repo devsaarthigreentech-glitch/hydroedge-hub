@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
+// Fixed, hard-coded whitelist — never built from user input.
+const ASSET_CODE_MAP: Record<string, { code: string; sequence: string }> = {
+    EOW: { code: "GD", sequence: "device_seq_gd" },
+    DG: { code: "GX", sequence: "device_seq_gx" },
+    Marine: { code: "GM", sequence: "device_seq_mr" },
+    Industrial: { code: "GI", sequence: "device_seq_in" },
+};
+
 export async function PATCH(
     request: NextRequest,
     context : {params : Promise<{ deviceId : string}>}
@@ -9,39 +17,37 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, sim_number, customer_id, notes } = body;
+        // NOTE: device_name is intentionally NOT accepted from the client anymore.
+        // It is fully server-generated once the naming conditions are met, and
+        // locked permanently after that. Any device_name sent by the client is ignored.
+        const { device_type, asset_name, sim_number, customer_id, notes, tested } = body;
+
+        // Fetch current state — needed to evaluate the naming gate correctly,
+        // including cases where only one of customer/asset/tested changes this call.
+        const currentResult = await query(
+            `SELECT customer_id, asset_name, tested, name_locked, device_name
+             FROM devices WHERE id = $1 AND deleted_at IS NULL`,
+            [deviceId]
+        );
+
+        if (currentResult.rows.length === 0) {
+            return NextResponse.json(
+                { success: false, error: 'Device not found' },
+                { status: 404 }
+            );
+        }
+
+        const current = currentResult.rows[0];
 
         const updates = [];
         const values = [];
         let paramCount = 1;
-
-        if (device_name !== undefined) {  // ← Only validate if it's being updated
-            if (!device_name.trim()) {
-                return NextResponse.json(
-                    { success: false, error: 'Device name cannot be empty' },
-                    { status: 400 }
-                );
-            }
-            
-            if (device_name.length > 100) {
-                return NextResponse.json(
-                    { success: false, error: 'Device name is too long (max 100 characters)' },
-                    { status: 400 }
-                );
-            }
-        }
 
         if (notes !== undefined && notes !== null && notes.length > 2000) {
             return NextResponse.json(
                 { success: false, error: 'Notes are too long (max 2000 characters)' },
                 { status: 400 }
             );
-        }
-
-        if(device_name !== undefined){
-            updates.push(`device_name = $${paramCount}`);
-            values.push(device_name);
-            paramCount++;
         }
 
         if(device_type !== undefined){
@@ -71,6 +77,45 @@ export async function PATCH(
         if (notes !== undefined) {
             updates.push(`notes = $${paramCount}`);
             values.push(notes);
+            paramCount++;
+        }
+
+        // ── Naming gate ──────────────────────────────────────────────
+        // Only fires the very first time all three conditions are true
+        // for a device whose name isn't locked yet. After that, name_locked
+        // permanently blocks any further renaming, no matter what changes.
+        const effectiveCustomerId = customer_id !== undefined ? customer_id : current.customer_id;
+        const effectiveAssetName = asset_name !== undefined ? asset_name : current.asset_name;
+        const effectiveTested = tested !== undefined ? tested : current.tested;
+
+        let nameAssigned = false;
+
+        if (
+            !current.name_locked &&
+            effectiveTested === true &&
+            effectiveCustomerId &&
+            effectiveAssetName &&
+            ASSET_CODE_MAP[effectiveAssetName]
+        ) {
+            const { code, sequence } = ASSET_CODE_MAP[effectiveAssetName];
+            const seqRes = await query(`SELECT nextval('${sequence}') AS n`);
+            const num = seqRes.rows[0].n as number;
+
+            const now = new Date();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const yy = String(now.getFullYear()).slice(-2);
+            const newName = `SGT-${code}-${mm}${yy}-${String(num).padStart(4, '0')}`;
+
+            updates.push(`device_name = $${paramCount}`); values.push(newName); paramCount++;
+            updates.push(`name_locked = $${paramCount}`); values.push(true); paramCount++;
+            updates.push(`tested = $${paramCount}`); values.push(true); paramCount++;
+            nameAssigned = true;
+        }
+
+        // If naming wasn't triggered this call, still persist a plain `tested` toggle if sent.
+        if (!nameAssigned && tested !== undefined) {
+            updates.push(`tested = $${paramCount}`);
+            values.push(tested);
             paramCount++;
         }
 
@@ -109,15 +154,15 @@ export async function PATCH(
 
         return NextResponse.json({
             success: true,
-            message : 'Device Name updated sucessfully',
+            message : 'Device updated sucessfully',
             data: result.rows[0]
         });
 
     } catch (err) {
-        console.error('Error updating device name : ',err);
+        console.error('Error updating device : ',err);
         return NextResponse.json({
             success: false,
-            error : 'Failed to update device name',
+            error : 'Failed to update device',
             message: err
         },
         {status : 500}

@@ -51,6 +51,8 @@ export interface Device {
   tags?: string[];
   created_at: string;
   updated_at?: string;
+  tested?: boolean; 
+  name_locked?: boolean;
 }
 
 // export interface TelemetryParameter {
