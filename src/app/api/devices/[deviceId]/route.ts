@@ -9,7 +9,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, sim_number, customer_id } = body;
+        const { device_name, device_type, asset_name, sim_number, customer_id, notes } = body;
 
         const updates = [];
         const values = [];
@@ -29,6 +29,13 @@ export async function PATCH(
                     { status: 400 }
                 );
             }
+        }
+
+        if (notes !== undefined && notes !== null && notes.length > 2000) {
+            return NextResponse.json(
+                { success: false, error: 'Notes are too long (max 2000 characters)' },
+                { status: 400 }
+            );
         }
 
         if(device_name !== undefined){
@@ -58,6 +65,12 @@ export async function PATCH(
         if (customer_id !== undefined) { 
             updates.push(`customer_id = $${paramCount}`); 
             values.push(customer_id); 
+            paramCount++;
+        }
+
+        if (notes !== undefined) {
+            updates.push(`notes = $${paramCount}`);
+            values.push(notes);
             paramCount++;
         }
 

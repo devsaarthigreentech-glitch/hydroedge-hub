@@ -43,6 +43,7 @@ export interface Device {
   asset_name?: string;
   asset_type?: string;
   sim_number?: string;
+  notes?: string;
   last_latitude?: number;
   last_longitude?: number;
   last_location_time?: string;
