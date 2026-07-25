@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
         d.manufacturer, d.protocol, d.status, d.connection_status,
         d.customer_id, d.asset_name, d.asset_type,
         d.sim_number, d.firmware_version, d.tags,
+        d.notes, d.tested, d.name_locked,
         d.created_at, d.updated_at,
         d.last_latitude, d.last_longitude, d.last_location_time
       FROM devices d
