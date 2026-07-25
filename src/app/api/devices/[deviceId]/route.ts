@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, sim_number, customer_id, notes, tested } = body;
+        const { device_name, device_type, asset_name, sim_number, customer_id, notes, tested, name_lock } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -113,20 +113,30 @@ export async function PATCH(
             paramCount++;
         }
 
-        // ── Naming gate (currently PAUSED — see AUTO_NAME_ASSIGNMENT_ENABLED) ──
-        // When re-enabled: fires the very first time all three conditions are
-        // true for a device whose name isn't locked yet. After that, name_locked
-        // permanently blocks any further renaming, no matter what changes.
+        // ── Naming gate ──────────────────────────────────────────────
+        // Assignment and locking are ATOMIC: a number is only drawn from the
+        // sequence at the same moment the name is locked. This matters because
+        // nextval() is non-transactional — if a device could sit in an
+        // "assigned but unlocked" state, every subsequent save would draw a
+        // fresh number and silently burn the series.
         const effectiveCustomerId = customer_id !== undefined ? customer_id : current.customer_id;
         const effectiveAssetName = asset_name !== undefined ? asset_name : current.asset_name;
         const effectiveTested = tested !== undefined ? tested : current.tested;
+        const effectiveNameLock = name_lock !== undefined ? name_lock : current.name_locked;
+
+        // A device that already carries a real name must never be renumbered,
+        // even if it gets unlocked and re-locked. Renaming those stays a
+        // deliberate manual/SQL operation.
+        const hasRealName = !!current.device_name && current.device_name !== 'SGT-####';
 
         let nameAssigned = false;
 
         if (
             AUTO_NAME_ASSIGNMENT_ENABLED &&
             !current.name_locked &&
+            !hasRealName &&
             effectiveTested === true &&
+            effectiveNameLock === true &&
             effectiveCustomerId &&
             effectiveAssetName &&
             ASSET_CODE_MAP[effectiveAssetName]
@@ -146,10 +156,28 @@ export async function PATCH(
             nameAssigned = true;
         }
 
-        // If naming wasn't triggered this call, still persist a plain `tested` toggle if sent.
+        // Persist a plain tested toggle when the gate didn't fire.
         if (!nameAssigned && tested !== undefined) {
             updates.push(`tested = $${paramCount}`);
             values.push(tested);
+            paramCount++;
+        }
+
+        // Persist a plain name_lock toggle when the gate didn't fire.
+        // Refuse to lock a device that has no real name yet — that would
+        // freeze it on the SGT-#### placeholder permanently.
+        if (!nameAssigned && name_lock !== undefined) {
+            if (name_lock === true && !hasRealName) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: 'Cannot lock a device that has no name yet. Set a customer and asset type, mark it tested, then lock to assign a name.',
+                    },
+                    { status: 400 }
+                );
+            }
+            updates.push(`name_locked = $${paramCount}`);
+            values.push(name_lock);
             paramCount++;
         }
 

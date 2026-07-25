@@ -29,6 +29,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
     customer_id: device.customer_id || "",
     notes: device.notes || "",
     tested: device.tested || false,
+    name_lock: device.name_locked || false,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -45,11 +46,11 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   // Device Name is server-generated and read-only; ticking Tested with a customer
   // and asset type set will assign the name and lock it permanently.
   const nameLocked = !!device.name_locked;
+  const hasRealName = !!device.device_name && device.device_name !== DUMMY_NAME;
   const testedGateMet = !!formData.customer_id && !!formData.asset_name;
-  // Once a name is locked the gate can never fire again, so `tested` is just
-  // record-keeping there and stays editable. Only block it when the device
-  // has no customer/asset yet.
   const testedDisabled = !testedGateMet;
+  // Name Lock only becomes available once the device is marked tested.
+  const nameLockDisabled = !formData.tested || !testedGateMet;
 
   const inputStyle: React.CSSProperties = {
     width: "100%", background: "white", border: `2px solid ${THEME.border.light}`,
@@ -95,6 +96,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
           customer_id: formData.customer_id,
           notes: formData.notes,
           tested: formData.tested,
+          name_lock: formData.name_lock,
         }),
       });
       const data = await response.json();
@@ -253,32 +255,69 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
           </select>
         </div>
 
-        {/* Tested — kept in place for when auto-naming is re-enabled; inert for now */}
+        {/* Tested — prerequisite for locking the name */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: testedDisabled ? "not-allowed" : "pointer" }}>
             <input
               type="checkbox"
               checked={formData.tested}
               disabled={testedDisabled}
-              onChange={(e) => setFormData({ ...formData, tested: e.target.checked })}
+              onChange={(e) => setFormData({
+                ...formData,
+                tested: e.target.checked,
+                // A device can't be locked without being tested.
+                name_lock: e.target.checked ? formData.name_lock : false,
+              })}
               style={{ width: 18, height: 18, cursor: testedDisabled ? "not-allowed" : "pointer" }}
             />
             <span style={{ fontSize: 13, fontWeight: 600, color: THEME.text.primary }}>Tested</span>
           </label>
 
-          {nameLocked ? (
-            <div style={{ fontSize: 11, color: formData.tested ? "#16a34a" : THEME.text.tertiary, marginTop: 6, fontWeight: formData.tested ? 600 : 400 }}>
-              {formData.tested
-                ? "✓ Tested — device name is assigned and locked"
-                : "Not marked tested. Name is already locked, so this is record-keeping only."}
-            </div>
-          ) : !testedGateMet ? (
+          {!testedGateMet ? (
             <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
               Select a customer and asset type before marking as tested
             </div>
+          ) : formData.tested ? (
+            <div style={{ fontSize: 11, color: "#16a34a", marginTop: 6, fontWeight: 600 }}>
+              ✓ Marked as tested
+            </div>
           ) : (
             <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
-              Checking this and saving will permanently assign the device name
+              Mark this once the device has been bench-tested
+            </div>
+          )}
+        </div>
+
+        {/* Name Lock — enabled only after Tested; assigns + locks the name */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: nameLockDisabled ? "not-allowed" : "pointer", opacity: nameLockDisabled ? 0.5 : 1 }}>
+            <input
+              type="checkbox"
+              checked={formData.name_lock}
+              disabled={nameLockDisabled}
+              onChange={(e) => setFormData({ ...formData, name_lock: e.target.checked })}
+              style={{ width: 18, height: 18, cursor: nameLockDisabled ? "not-allowed" : "pointer" }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 600, color: THEME.text.primary }}>
+              Lock Name {nameLocked && <span style={{ color: "#16a34a" }}>🔒</span>}
+            </span>
+          </label>
+
+          {nameLockDisabled ? (
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+              Mark the device as tested first
+            </div>
+          ) : nameLocked ? (
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+              Unticking this and saving will unlock the name so it can be changed
+            </div>
+          ) : hasRealName ? (
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+              Locking will freeze the current name. Existing names are never renumbered.
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: "#b45309", marginTop: 6, fontWeight: 600 }}>
+              ⚠ Saving with this ticked will assign the next number in the series and lock it permanently
             </div>
           )}
         </div>
