@@ -56,7 +56,7 @@ export async function PATCH(
         // device_name is freely editable for as long as the device is UNLOCKED.
         // Once locked it is immutable — unlock it first to rename.
         if (device_name !== undefined && !current.name_locked) {
-            if (!device_name.trim()) {
+            if (typeof device_name !== 'string' || !device_name.trim()) {
                 return NextResponse.json(
                     { success: false, error: 'Device name cannot be empty' },
                     { status: 400 }
@@ -77,11 +77,9 @@ export async function PATCH(
             );
         }
 
-        if (device_name !== undefined && !current.name_locked) {
-            updates.push(`device_name = $${paramCount}`);
-            values.push(device_name.trim());
-            paramCount++;
-        }
+        // NOTE: the manual device_name update is applied AFTER the naming gate
+        // below — if the gate fires it sets device_name itself, and pushing it
+        // here too would produce "multiple assignments to same column".
 
         if(device_type !== undefined){
             updates.push(`device_type = $${paramCount}`);
@@ -153,6 +151,14 @@ export async function PATCH(
             updates.push(`name_locked = $${paramCount}`); values.push(true); paramCount++;
             updates.push(`tested = $${paramCount}`); values.push(true); paramCount++;
             nameAssigned = true;
+        }
+
+        // Manual name edit — only when the gate didn't assign a name itself,
+        // and only while the device is unlocked.
+        if (!nameAssigned && device_name !== undefined && !current.name_locked) {
+            updates.push(`device_name = $${paramCount}`);
+            values.push(device_name.trim());
+            paramCount++;
         }
 
         // Persist a plain tested toggle when the gate didn't fire.
