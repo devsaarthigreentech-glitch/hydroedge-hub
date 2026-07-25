@@ -53,9 +53,9 @@ export async function PATCH(
         const values = [];
         let paramCount = 1;
 
-        // Manual device_name entry — only validated/applied while auto-naming
-        // is disabled. When enabled, any client-sent device_name is ignored.
-        if (!AUTO_NAME_ASSIGNMENT_ENABLED && device_name !== undefined) {
+        // device_name is freely editable for as long as the device is UNLOCKED.
+        // Once locked it is immutable — unlock it first to rename.
+        if (device_name !== undefined && !current.name_locked) {
             if (!device_name.trim()) {
                 return NextResponse.json(
                     { success: false, error: 'Device name cannot be empty' },
@@ -77,9 +77,9 @@ export async function PATCH(
             );
         }
 
-        if (!AUTO_NAME_ASSIGNMENT_ENABLED && device_name !== undefined) {
+        if (device_name !== undefined && !current.name_locked) {
             updates.push(`device_name = $${paramCount}`);
-            values.push(device_name);
+            values.push(device_name.trim());
             paramCount++;
         }
 
@@ -122,21 +122,20 @@ export async function PATCH(
         const effectiveCustomerId = customer_id !== undefined ? customer_id : current.customer_id;
         const effectiveAssetName = asset_name !== undefined ? asset_name : current.asset_name;
         const effectiveTested = tested !== undefined ? tested : current.tested;
-        const effectiveNameLock = name_lock !== undefined ? name_lock : current.name_locked;
 
-        // A device that already carries a real name must never be renumbered,
-        // even if it gets unlocked and re-locked. Renaming those stays a
-        // deliberate manual/SQL operation.
-        const hasRealName = !!current.device_name && current.device_name !== 'SGT-####';
+        // A device that already carries a SERIES name must never be renumbered,
+        // even if it is unlocked and re-saved with tested still ticked.
+        // Free-text placeholder names (Device-123456, "bench unit 3", etc.)
+        // are NOT series names and remain eligible for assignment.
+        const hasSeriesName = /^SGT-G[DXMI]-\d{4}-\d+$/.test(current.device_name || '');
 
         let nameAssigned = false;
 
         if (
             AUTO_NAME_ASSIGNMENT_ENABLED &&
             !current.name_locked &&
-            !hasRealName &&
+            !hasSeriesName &&
             effectiveTested === true &&
-            effectiveNameLock === true &&
             effectiveCustomerId &&
             effectiveAssetName &&
             ASSET_CODE_MAP[effectiveAssetName]
@@ -163,19 +162,9 @@ export async function PATCH(
             paramCount++;
         }
 
-        // Persist a plain name_lock toggle when the gate didn't fire.
-        // Refuse to lock a device that has no real name yet — that would
-        // freeze it on the SGT-#### placeholder permanently.
+        // Plain lock/unlock toggle when the gate didn't fire.
+        // Unticking unlocks the name so it can be freely edited again.
         if (!nameAssigned && name_lock !== undefined) {
-            if (name_lock === true && !hasRealName) {
-                return NextResponse.json(
-                    {
-                        success: false,
-                        error: 'Cannot lock a device that has no name yet. Set a customer and asset type, mark it tested, then lock to assign a name.',
-                    },
-                    { status: 400 }
-                );
-            }
             updates.push(`name_locked = $${paramCount}`);
             values.push(name_lock);
             paramCount++;

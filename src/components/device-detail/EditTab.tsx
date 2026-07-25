@@ -23,6 +23,7 @@ const ASSET_TYPES = [
 
 export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps) {
   const [formData, setFormData] = useState({
+    device_name: device.device_name || "",
     device_type: device.device_type,
     asset_name: device.asset_name || "",
     sim_number: device.sim_number || "",
@@ -50,7 +51,8 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   const testedGateMet = !!formData.customer_id && !!formData.asset_name;
   const testedDisabled = !testedGateMet;
   // Name Lock only becomes available once the device is marked tested.
-  const nameLockDisabled = !formData.tested || !testedGateMet;
+  // Lock is a free toggle: untick to make the name editable again.
+  const nameLockDisabled = false;
 
   const inputStyle: React.CSSProperties = {
     width: "100%", background: "white", border: `2px solid ${THEME.border.light}`,
@@ -83,13 +85,16 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   const handleSave = async () => {
     setError("");
     setSuccess(false);
+    if (!nameLocked && !formData.device_name.trim()) {
+      setError("Device name cannot be empty"); return;
+    }
     setIsSaving(true);
     try {
       const response = await fetch(`/api/devices/${device.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // device_name omitted — server-generated and locked
+          device_name: formData.device_name,
           device_type: formData.device_type,
           asset_name: formData.asset_name,
           sim_number: formData.sim_number,
@@ -143,19 +148,27 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
       {/* Form Card */}
       <div style={{ background: "white", borderRadius: 12, border: `2px solid ${THEME.border.light}`, padding: 24, maxWidth: 700, boxShadow: THEME.shadow.sm }}>
 
-        {/* Device Name — auto-generated & locked, not manually editable */}
+        {/* Device Name — free text until locked, then immutable */}
         <div style={{ marginBottom: 20 }}>
           <label style={labelStyle}>Device Name</label>
           <input
             type="text"
-            value={nameLocked ? device.device_name : DUMMY_NAME}
-            disabled
-            style={{ ...inputStyle, background: THEME.neutral[50], color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace", cursor: "not-allowed", opacity: 0.7 }}
+            value={formData.device_name}
+            disabled={nameLocked}
+            onChange={(e) => setFormData({ ...formData, device_name: e.target.value })}
+            placeholder="Name this device so you can identify it"
+            style={nameLocked
+              ? { ...inputStyle, background: THEME.neutral[50], color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace", cursor: "not-allowed", opacity: 0.7 }
+              : inputStyle}
+            onFocus={nameLocked ? undefined : focusStyle}
+            onBlur={nameLocked ? undefined : blurStyle}
           />
           <div style={{ fontSize: 11, color: nameLocked ? "#16a34a" : THEME.text.tertiary, marginTop: 6, fontWeight: nameLocked ? 600 : 400 }}>
             {nameLocked
-              ? "🔒 Name is locked and cannot be changed"
-              : "Auto-assigned once Customer, Asset Type, and Tested are all set"}
+              ? "🔒 Locked. Untick \u201cLock Name\u201d below and save to edit."
+              : formData.tested
+                ? "\u26a0 Saving with Tested ticked will replace this with the next series name and lock it"
+                : "Editable \u2014 rename freely until the device is marked tested"}
           </div>
         </div>
 
@@ -303,21 +316,13 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             </span>
           </label>
 
-          {nameLockDisabled ? (
+          {nameLocked ? (
             <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
-              Mark the device as tested first
-            </div>
-          ) : nameLocked ? (
-            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
-              Unticking this and saving will unlock the name so it can be changed
-            </div>
-          ) : hasRealName ? (
-            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
-              Locking will freeze the current name. Existing names are never renumbered.
+              Untick and save to unlock the name for editing
             </div>
           ) : (
-            <div style={{ fontSize: 11, color: "#b45309", marginTop: 6, fontWeight: 600 }}>
-              ⚠ Saving with this ticked will assign the next number in the series and lock it permanently
+            <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+              Freezes the current name as-is. Ticking Tested locks it automatically.
             </div>
           )}
         </div>
