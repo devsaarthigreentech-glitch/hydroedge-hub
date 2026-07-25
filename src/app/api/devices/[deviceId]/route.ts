@@ -2,19 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
 // ── Auto-naming series switch ───────────────────────────────────────────
-// Set to true to re-enable the Tested-gated auto-naming/locking behavior
-// (SGT-XX-MMYY-####). While false, device_name is taken directly from the
-// client (manual entry) and the gate below never fires, regardless of
-// tested/customer/asset state.
+// TRUE  = Tested-gated auto-naming/locking is ACTIVE. device_name is
+//         server-generated as SGT-XX-MMYY-#### once a device has a customer,
+//         an asset type, and tested=true — then permanently locked.
+//         Any device_name sent by the client is ignored.
+// FALSE = manual naming; device_name accepted from the client, gate never fires.
 //
-// Before flipping back to true: since names are being assigned manually
-// right now, first advance each sequence past your latest manually-used
-// number so numbering continues correctly, e.g.:
-//   SELECT setval('device_seq_gx', <last GX number you used manually>);
-//   SELECT setval('device_seq_gd', <last GD number you used manually>);
-//   SELECT setval('device_seq_mr', <last GM number you used manually>);
-//   SELECT setval('device_seq_in', <last GI number you used manually>);
-const AUTO_NAME_ASSIGNMENT_ENABLED = false;
+// If ever set back to false and then true again, re-run reenable_autonaming.sql
+// first: existing names must be locked and the sequences advanced past any
+// manually-assigned numbers, or devices will be silently renamed.
+// Sequences were last set 2026-07-25: GD=24, GX=30 (next are 0025 / 0031).
+const AUTO_NAME_ASSIGNMENT_ENABLED = true;
 
 // Fixed, hard-coded whitelist — never built from user input.
 const ASSET_CODE_MAP: Record<string, { code: string; sequence: string }> = {
@@ -55,8 +53,9 @@ export async function PATCH(
         const values = [];
         let paramCount = 1;
 
-        // Manual device_name entry — active while auto-naming is paused.
-        if (device_name !== undefined) {
+        // Manual device_name entry — only validated/applied while auto-naming
+        // is disabled. When enabled, any client-sent device_name is ignored.
+        if (!AUTO_NAME_ASSIGNMENT_ENABLED && device_name !== undefined) {
             if (!device_name.trim()) {
                 return NextResponse.json(
                     { success: false, error: 'Device name cannot be empty' },
