@@ -1,154 +1,208 @@
-// "use client";
-
-// import React from "react";
-// import { Device, Customer } from "@/types";
-// import { formatTimestamp } from "@/lib/utils";
-
-// interface InfoTabProps {
-//   device: Device;
-//   customer?: Customer;
-// }
-
-// export function InfoTab({ device, customer }: InfoTabProps) {
-//   const infoRows = [
-//     ["Device Name", device.device_name],
-//     ["IMEI", device.imei],
-//     ["Type", `${device.manufacturer} ${device.device_type}`],
-//     ["Firmware", device.firmware_version],
-//     ["Status", device.status],
-//     ["Connection", device.connection_status],
-//     ["SIM", device.sim_number || "—"],
-//     ["Asset", device.asset_name || "—"],
-//     ["Asset Type", device.asset_type || "—"],
-//     ["Customer", customer?.name || "Unassigned"],
-//     [
-//       "Last Position",
-//       device.last_latitude && device.last_longitude
-//         ? `${device.last_latitude}, ${device.last_longitude}`
-//         : "—",
-//     ],
-//     [
-//       "Last Update",
-//       device.last_location_time
-//         ? formatTimestamp(device.last_location_time)
-//         : "—",
-//     ],
-//     ["Tags", device.tags?.join(", ") || "—"],
-//   ];
-
-//   return (
-//     <div style={{ padding: 24, maxWidth: 700 }}>
-//       <div
-//         style={{
-//           fontSize: 16,
-//           fontWeight: 700,
-//           color: "#f1f5f9",
-//           marginBottom: 20,
-//         }}
-//       >
-//         Device Information
-//       </div>
-//       {infoRows.map(([label, val]) => (
-//         <div
-//           key={label}
-//           style={{
-//             display: "flex",
-//             borderBottom: "1px solid #2a2a2a",
-//             padding: "10px 0",
-//           }}
-//         >
-//           <div
-//             style={{
-//               width: 160,
-//               color: "#6b7280",
-//               fontWeight: 500,
-//               fontSize: 12,
-//             }}
-//           >
-//             {label}
-//           </div>
-//           <div
-//             style={{
-//               color: "#e2e8f0",
-//               fontSize: 13,
-//               fontFamily: label === "IMEI" ? "monospace" : "inherit",
-//             }}
-//           >
-//             {val}
-//           </div>
-//         </div>
-//       ))}
-//     </div>
-//   );
-// }
 "use client";
 
 import React from "react";
 import { Device, Customer } from "@/types";
 import { formatTimestamp } from "@/lib/utils";
 import { THEME } from "@/lib/theme";
+import { getAssetSeries, getAssetLabel, getSeriesPattern, parseSeriesName } from "@/lib/asset-series";
 
 interface InfoTabProps {
   device: Device;
   customer?: Customer;
 }
 
+interface InfoRow {
+  label: string;
+  value?: string;
+  /** Rendered instead of `value` when present — used for badges and pills. */
+  node?: React.ReactNode;
+  mono?: boolean;
+}
+
+interface InfoSection {
+  title: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+  rows: InfoRow[];
+}
+
+/** Small coloured pill used for boolean/state fields. */
+function Pill({ text, tone }: { text: string; tone: "on" | "off" | "warn" }) {
+  const palette = {
+    on: { bg: THEME.primary[50], border: THEME.primary[500], fg: THEME.primary[700] },
+    off: { bg: THEME.neutral[100], border: THEME.neutral[300], fg: THEME.text.secondary },
+    warn: { bg: "#fef3c7", border: THEME.status.warning, fg: "#92400e" },
+  }[tone];
+
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "3px 10px",
+        borderRadius: 6,
+        background: palette.bg,
+        border: `1.5px solid ${palette.border}`,
+        color: palette.fg,
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: 0.3,
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
 export function InfoTab({ device, customer }: InfoTabProps) {
-  const sections = [
+  // Mirrors the Edit tab: asset_name stores the asset TYPE, which drives the
+  // naming series. Show the friendly label plus the series it maps to.
+  const series = getAssetSeries(device.asset_name);
+  const assignedSeries = parseSeriesName(device.device_name);
+  const isTested = !!device.tested;
+  const isLocked = !!device.name_locked;
+
+  const sections: InfoSection[] = [
     {
-      title: "📱 Device Details",
+      title: "Device Details",
       icon: "📱",
       color: THEME.primary[500],
       bgColor: THEME.primary[50],
       rows: [
-        ["Device Name", device.device_name],
-        ["IMEI", device.imei, true], // true = monospace
-        ["Type", `${device.manufacturer} ${device.device_type}`],
-        ["Firmware", device.firmware_version],
+        { label: "Device Name", value: device.device_name || "—", mono: !!assignedSeries },
+        { label: "IMEI", value: device.imei, mono: true },
+        { label: "Type", value: `${device.manufacturer} ${device.device_type}` },
+        { label: "Protocol", value: device.protocol || "—" },
+        { label: "Firmware", value: device.firmware_version || "—" },
       ],
     },
     {
-      title: "🔌 Connection Status",
-      icon: "🔌",
+      title: "Naming & Commissioning",
+      icon: "🏷️",
       color: THEME.secondary[500],
       bgColor: THEME.secondary[50],
       rows: [
-        ["Status", device.status],
-        ["Connection", device.connection_status],
-        ["SIM Number", device.sim_number || "—", true],
+        {
+          label: "Asset Type Series",
+          node: series ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 6,
+                  background: THEME.primary[500],
+                  color: "white",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  fontFamily: "JetBrains Mono, monospace",
+                  letterSpacing: 1,
+                }}
+              >
+                {series.code}
+              </span>
+              {series.brand && <span style={{ fontWeight: 600 }}>{series.brand}</span>}
+              <span
+                style={{
+                  color: THEME.text.secondary,
+                  fontFamily: "JetBrains Mono, monospace",
+                  fontSize: 13,
+                }}
+              >
+                {assignedSeries && assignedSeries.code === series.code
+                  ? device.device_name
+                  : getSeriesPattern(series)}
+              </span>
+            </span>
+          ) : (
+            <span style={{ color: THEME.text.tertiary }}>— No series (asset type not set) —</span>
+          ),
+        },
+        {
+          label: "Series Number",
+          node: assignedSeries ? (
+            <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
+              #{assignedSeries.number}{" "}
+              <span style={{ color: THEME.text.tertiary, fontFamily: "inherit", fontSize: 13 }}>
+                (assigned {assignedSeries.period.slice(0, 2)}/{assignedSeries.period.slice(2)})
+              </span>
+            </span>
+          ) : (
+            <span style={{ color: THEME.text.tertiary }}>Not yet assigned</span>
+          ),
+        },
+        {
+          label: "Tested",
+          node: isTested ? <Pill text="✓ TESTED" tone="on" /> : <Pill text="NOT TESTED" tone="off" />,
+        },
+        {
+          label: "Name Lock",
+          node: isLocked ? <Pill text="🔒 LOCKED" tone="on" /> : <Pill text="UNLOCKED" tone="warn" />,
+        },
       ],
     },
     {
-      title: "🚗 Asset Information",
+      title: "Asset Information",
       icon: "🚗",
       color: THEME.accent[500],
       bgColor: THEME.accent[50],
       rows: [
-        ["Asset Name", device.asset_name || "—"],
-        ["Asset Type", device.asset_type || "—"],
-        ["Customer", customer?.name || "Unassigned"],
-        ["Tags", device.tags?.join(", ") || "—"],
+        { label: "Asset Type", value: getAssetLabel(device.asset_name) },
+        {
+          label: "Health Monitoring",
+          node: series?.healthMonitoring ? (
+            <Pill text={`⚡ ${series.brand} ENABLED`} tone="on" />
+          ) : (
+            <Pill text="NOT APPLICABLE" tone="off" />
+          ),
+        },
+        { label: "Asset Label", value: device.asset_type || "—" },
+        { label: "Customer", value: customer?.name || "Unassigned" },
+        { label: "Tags", value: device.tags?.join(", ") || "—" },
       ],
     },
     {
-      title: "📍 Location & Tracking",
+      title: "Connection Status",
+      icon: "🔌",
+      color: THEME.secondary[500],
+      bgColor: THEME.secondary[50],
+      rows: [
+        { label: "Status", value: device.status },
+        { label: "Connection", value: device.connection_status },
+        { label: "SIM Number", value: device.sim_number || "—", mono: true },
+        {
+          label: "Last Contact",
+          value: device.last_contact_at ? formatTimestamp(device.last_contact_at) : "—",
+        },
+      ],
+    },
+    {
+      title: "Location & Tracking",
       icon: "📍",
       color: "#3b82f6",
       bgColor: "#eff6ff",
       rows: [
-        [
-          "Last Position",
-          device.last_latitude && device.last_longitude
-            ? `${device.last_latitude}, ${device.last_longitude}`
-            : "—",
-          true,
-        ],
-        [
-          "Last Update",
-          device.last_location_time
-            ? formatTimestamp(device.last_location_time)
-            : "—",
-        ],
+        {
+          label: "Last Position",
+          value:
+            device.last_latitude && device.last_longitude
+              ? `${device.last_latitude}, ${device.last_longitude}`
+              : "—",
+          mono: true,
+        },
+        {
+          label: "Last Update",
+          value: device.last_location_time ? formatTimestamp(device.last_location_time) : "—",
+        },
+      ],
+    },
+    {
+      title: "Record",
+      icon: "🗂️",
+      color: THEME.neutral[400],
+      bgColor: THEME.neutral[50],
+      rows: [
+        { label: "Created", value: device.created_at ? formatTimestamp(device.created_at) : "—" },
+        { label: "Last Modified", value: device.updated_at ? formatTimestamp(device.updated_at) : "—" },
       ],
     },
   ];
@@ -191,63 +245,95 @@ export function InfoTab({ device, customer }: InfoTabProps) {
             >
               <span style={{ fontSize: 20 }}>{section.icon}</span>
               <div style={{ fontSize: 15, fontWeight: 700, color: THEME.text.primary }}>
-                {section.title.replace(/^[^\s]+ /, "")}
+                {section.title}
               </div>
             </div>
 
             {/* Info Rows */}
             <div style={{ padding: "4px 0" }}>
-              {section.rows.map((row, index) => {
-                const label = row[0] as string;
-                const value = row[1] as string;
-                const isMonospace = row[2] as boolean | undefined;
-                
-                return (
+              {section.rows.map((row, index) => (
+                <div
+                  key={`${section.title}-${row.label}`}
+                  style={{
+                    display: "flex",
+                    padding: "14px 20px",
+                    borderBottom:
+                      index < section.rows.length - 1 ? `1px solid ${THEME.border.light}` : "none",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = section.bgColor;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "white";
+                  }}
+                >
                   <div
-                    key={`${section.title}-${label}-${index}`}
                     style={{
-                      display: "flex",
-                      padding: "14px 20px",
-                      borderBottom: index < section.rows.length - 1 ? `1px solid ${THEME.border.light}` : "none",
-                      transition: "all 0.2s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = section.bgColor;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "white";
+                      width: 180,
+                      flexShrink: 0,
+                      color: THEME.text.tertiary,
+                      fontWeight: 600,
+                      fontSize: 12,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                      paddingTop: 2,
                     }}
                   >
-                    <div
-                      style={{
-                        width: 180,
-                        color: THEME.text.tertiary,
-                        fontWeight: 600,
-                        fontSize: 12,
-                        textTransform: "uppercase",
-                        letterSpacing: 0.5,
-                        paddingTop: 2,
-                      }}
-                    >
-                      {label}
-                    </div>
-                    <div
-                      style={{
-                        flex: 1,
-                        color: THEME.text.primary,
-                        fontSize: 14,
-                        fontWeight: 500,
-                        fontFamily: isMonospace ? "JetBrains Mono, monospace" : "inherit",
-                      }}
-                    >
-                      {value}
-                    </div>
+                    {row.label}
                   </div>
-                );
-              })}
+                  <div
+                    style={{
+                      flex: 1,
+                      color: THEME.text.primary,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      fontFamily: row.mono ? "JetBrains Mono, monospace" : "inherit",
+                    }}
+                  >
+                    {row.node ?? row.value}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         ))}
+
+        {/* Notes — free-form, so it gets its own full-width card */}
+        <div
+          style={{
+            background: "white",
+            border: `2px solid ${THEME.border.light}`,
+            borderRadius: 12,
+            overflow: "hidden",
+            boxShadow: THEME.shadow.sm,
+          }}
+        >
+          <div
+            style={{
+              padding: "14px 18px",
+              background: THEME.accent[50],
+              borderBottom: `3px solid ${THEME.accent[500]}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <span style={{ fontSize: 20 }}>📝</span>
+            <div style={{ fontSize: 15, fontWeight: 700, color: THEME.text.primary }}>Notes</div>
+          </div>
+          <div
+            style={{
+              padding: 20,
+              fontSize: 14,
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+              color: device.notes ? THEME.text.primary : THEME.text.tertiary,
+            }}
+          >
+            {device.notes || "No notes recorded for this device."}
+          </div>
+        </div>
 
         {/* Quick Stats Card */}
         <div
@@ -293,12 +379,7 @@ export function InfoTab({ device, customer }: InfoTabProps) {
                 textAlign: "center",
               }}
             >
-              <div
-                style={{
-                  fontSize: 24,
-                  marginBottom: 8,
-                }}
-              >
+              <div style={{ fontSize: 24, marginBottom: 8 }}>
                 {device.connection_status === "online" ? "🟢" : "⚫"}
               </div>
               <div style={{ fontSize: 11, color: THEME.text.tertiary, marginBottom: 4, fontWeight: 600 }}>
@@ -325,12 +406,7 @@ export function InfoTab({ device, customer }: InfoTabProps) {
                 textAlign: "center",
               }}
             >
-              <div
-                style={{
-                  fontSize: 24,
-                  marginBottom: 8,
-                }}
-              >
+              <div style={{ fontSize: 24, marginBottom: 8 }}>
                 {device.status === "active" ? "✅" : "⏸️"}
               </div>
               <div style={{ fontSize: 11, color: THEME.text.tertiary, marginBottom: 4, fontWeight: 600 }}>
@@ -347,6 +423,33 @@ export function InfoTab({ device, customer }: InfoTabProps) {
               </div>
             </div>
 
+            {/* Commissioning — Tested + locked name is the "done" state */}
+            <div
+              style={{
+                padding: 16,
+                background: isTested && isLocked ? THEME.primary[50] : THEME.neutral[50],
+                border: `2px solid ${isTested && isLocked ? THEME.primary[500] : THEME.neutral[300]}`,
+                borderRadius: 10,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 24, marginBottom: 8 }}>
+                {isTested && isLocked ? "🔒" : isTested ? "🧪" : "🛠️"}
+              </div>
+              <div style={{ fontSize: 11, color: THEME.text.tertiary, marginBottom: 4, fontWeight: 600 }}>
+                COMMISSIONING
+              </div>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: isTested && isLocked ? THEME.primary[600] : THEME.text.secondary,
+                }}
+              >
+                {isTested && isLocked ? "COMMISSIONED" : isTested ? "TESTED" : "IN SETUP"}
+              </div>
+            </div>
+
             {/* Location Available */}
             <div
               style={{
@@ -357,12 +460,7 @@ export function InfoTab({ device, customer }: InfoTabProps) {
                 textAlign: "center",
               }}
             >
-              <div
-                style={{
-                  fontSize: 24,
-                  marginBottom: 8,
-                }}
-              >
+              <div style={{ fontSize: 24, marginBottom: 8 }}>
                 {device.last_latitude ? "📍" : "❓"}
               </div>
               <div style={{ fontSize: 11, color: THEME.text.tertiary, marginBottom: 4, fontWeight: 600 }}>

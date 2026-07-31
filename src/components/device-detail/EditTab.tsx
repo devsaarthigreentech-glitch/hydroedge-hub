@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Device, Customer } from "@/types";
 import { THEME } from "@/lib/theme";
+import { ASSET_SERIES, getAssetSeries, getSeriesPattern, parseSeriesName } from "@/lib/asset-series";
 
 interface EditTabProps {
   device: Device;
@@ -12,14 +13,6 @@ interface EditTabProps {
 }
 
 const DUMMY_NAME = "SGT-####";
-
-const ASSET_TYPES = [
-  { value: "", label: "— Select asset type —" },
-  { value: "EOW", label: "Engine on Wheels" },
-  { value: "DG", label: "DG (Diesel Generator)" },
-  { value: "Marine", label: "Marine" },
-  { value: "Industrial", label: "Industrial" },
-];
 
 export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps) {
   const [formData, setFormData] = useState({
@@ -41,7 +34,11 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
   const [success, setSuccess] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const showHealthHint = formData.asset_name === "DG" || formData.asset_name === "EOW";
+  // Series is derived from the asset type — the server owns assignment, this is
+  // display-only so the operator can see which sequence the device lands in.
+  const series = getAssetSeries(formData.asset_name);
+  const assignedSeries = parseSeriesName(device.device_name);
+  const showHealthHint = !!series?.healthMonitoring;
 
   // Auto-naming is ACTIVE (AUTO_NAME_ASSIGNMENT_ENABLED = true in route.ts).
   // Device Name is server-generated and read-only; ticking Tested with a customer
@@ -216,7 +213,8 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             onFocus={focusStyle}
             onBlur={blurStyle}
           >
-            {ASSET_TYPES.map((a) => (
+            <option value="">— Select asset type —</option>
+            {ASSET_SERIES.map((a) => (
               <option key={a.value} value={a.value}>{a.label}</option>
             ))}
           </select>
@@ -230,9 +228,63 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
               display: "flex", alignItems: "center", gap: 6,
             }}>
               <span>⚡</span>
-              {formData.asset_name === "EOW" ? "GreenDrive" : "GreenX"} system health monitoring will be enabled for this device
+              {series?.brand} system health monitoring will be enabled for this device
             </div>
           )}
+        </div>
+
+        {/* ── Asset Type Series (read-only, derived from Asset Type) ── */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>Asset Type Series</label>
+          <div
+            style={{
+              ...inputStyle,
+              background: series ? THEME.primary[50] : THEME.neutral[50],
+              border: `2px solid ${series ? THEME.primary[200] : THEME.border.light}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              minHeight: 46,
+            }}
+          >
+            {series ? (
+              <>
+                <span style={{
+                  padding: "4px 10px", borderRadius: 6, background: THEME.primary[500],
+                  color: "white", fontSize: 13, fontWeight: 800,
+                  fontFamily: "JetBrains Mono, monospace", letterSpacing: 1,
+                }}>
+                  {series.code}
+                </span>
+                {series.brand && (
+                  <span style={{ fontSize: 13, fontWeight: 600, color: THEME.text.primary }}>
+                    {series.brand}
+                  </span>
+                )}
+                <span style={{
+                  marginLeft: "auto", fontSize: 13, color: THEME.text.secondary,
+                  fontFamily: "JetBrains Mono, monospace",
+                }}>
+                  {assignedSeries && assignedSeries.code === series.code
+                    ? device.device_name
+                    : getSeriesPattern(series)}
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: 13, color: THEME.text.tertiary }}>
+                — Select an asset type to see its series —
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6 }}>
+            {assignedSeries
+              ? assignedSeries.code === series?.code
+                ? `Assigned from the ${series?.code} series — number ${assignedSeries.number} of ${assignedSeries.period.slice(0, 2)}/${assignedSeries.period.slice(2)}. Series names are never renumbered.`
+                : `Name was assigned from the ${assignedSeries.code} series. Changing the asset type will not renumber it.`
+              : series
+                ? "Assigned automatically from this series when the device is marked tested. Set by the server — not editable."
+                : "The series determines the device name prefix and the sequence its number is drawn from."}
+          </div>
         </div>
 
         {/* SIM Number */}

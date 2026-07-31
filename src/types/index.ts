@@ -29,6 +29,7 @@ export interface Customer {
 }
 
 export interface Device {
+  last_contact_at: string | undefined;
   is_online: boolean;
   last_seen: any;
   id: string; // UUID

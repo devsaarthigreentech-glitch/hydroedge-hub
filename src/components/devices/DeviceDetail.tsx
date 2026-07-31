@@ -1,242 +1,3 @@
-// "use client";
-
-// import React, { useState } from "react";
-// import { Device, DeviceTab, Customer, Command } from "@/types";
-// import { Icons } from "@/components/ui/Icons";
-// import { InfoTab } from "../device-detail/InfoTab";
-// import { EditTab } from "../device-detail/EditTab";
-// import { TelemetryTab } from "../device-detail/TelemetryTab";
-// import { TelemetryGraphTab } from "../device-detail/TelemetryGraphTab";
-// import { CommandsTab } from "../device-detail/CommandsTab";
-// import { LogsTab } from "../device-detail/LogsTab";
-// import { SettingsTab } from "../device-detail/SettingsTab";
-// import { timeAgo } from "@/lib/utils";
-// import { MapTab } from "../device-detail/MapTab";
-// import { AnalyticsTab } from "../device-detail/AnalyticsTab";
-// import { TeltonikaConfigurator } from "../device-detail/TeltonikaConfigurator";
-// import { getAllowedTabs } from "@/lib/tab-permissions";
-
-// interface DeviceDetailProps {
-//   device: Device;
-//   onClose: () => void;
-//   customers: Customer[];
-//   telemetry: any[];
-//   commands: Command[];
-//   lastUpdate? : string;
-//   onSendCommand: (command: string) => void;
-//   onDeviceDeleted:  () => void,
-//   onDeviceUpdated: (device: Device) => void
-//   customerType?: string;
-// }
-
-// export function DeviceDetail({
-//   device,
-//   onClose,
-//   customers,
-//   telemetry,
-//   commands,
-//   lastUpdate,
-//   onSendCommand,
-//   onDeviceDeleted,
-//   onDeviceUpdated,
-//   customerType
-
-// }: DeviceDetailProps) {
-//   const [selectedTab, setSelectedTab] = useState<DeviceTab>("telemetry");
-
-//   const customer = customers.find((c) => c.id === device.customer_id);
-
-//   const tabs = [
-//     { key: "info" as DeviceTab, label: "INFO", icon: Icons.Info },
-//     { key: "edit" as DeviceTab, label: "EDIT", icon: Icons.Edit },
-//     { key: "telemetry" as DeviceTab, label: "TELEMETRY", icon: Icons.Telemetry },
-//     { key: "graphs" as DeviceTab, label: "GRAPHS", icon: Icons.TrendingUp },
-//     { key: "analytics" as DeviceTab, label: "ANALYTICS", icon: Icons.TrendingUp },
-//     { key: "commands" as DeviceTab, label: "COMMANDS", icon: Icons.Commands },
-//     { key: "config" as DeviceTab, label: "CONFIG", icon: Icons.Commands },
-//     { key: "logs" as DeviceTab, label: "LOGS & MESSAGES", icon: Icons.Logs },
-//     { key: "settings" as DeviceTab, label: "SETTINGS", icon: Icons.Settings },
-//     { key: "map" as DeviceTab, label: "MAP", icon: Icons.MapPin }
-//   ];
-
-//   const visibleTabs = customerType
-//   ? tabs.filter(tab => getAllowedTabs(customerType).includes(tab.key))
-//   : tabs;
-
-//   return (
-//     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-//       {/* Device header bar */}
-//       <div
-//         style={{
-//           background:
-//             device.connection_status === "online"
-//               ? "rgba(0, 200, 83, 0.1)"
-//               : "#242424",
-//           borderBottom: "1px solid #333",
-//           padding: "12px 20px",
-//           display: "flex",
-//           alignItems: "center",
-//           gap: 16,
-//         }}
-//       >
-//         <button
-//           onClick={onClose}
-//           style={{
-//             background: "none",
-//             border: "none",
-//             color: "#94a3b8",
-//             cursor: "pointer",
-//             padding: 4,
-//             display: "flex",
-//           }}
-//         >
-//           <Icons.Close />
-//         </button>
-//         <div
-//           style={{
-//             width: 40,
-//             height: 40,
-//             borderRadius: 8,
-//             background: "#2a2a2a",
-//             border: "1px solid #3a3a3a",
-//             display: "flex",
-//             alignItems: "center",
-//             justifyContent: "center",
-//           }}
-//         >
-//           <Icons.Devices />
-//         </div>
-//         <div style={{ flex: 1 }}>
-//           <div style={{ fontWeight: 700, fontSize: 14, color: "#f1f5f9" }}>
-//             {device.device_name}
-//           </div>
-//           <div
-//             style={{ fontSize: 11, color: "#6b7280", fontFamily: "monospace" }}
-//           >
-//             ▫ {device.imei}
-//           </div>
-//         </div>
-//         <div
-//           style={{
-//             width: 32,
-//             height: 32,
-//             borderRadius: "50%",
-//             background:
-//               device.connection_status === "online" ? "#00c853" : "#424242",
-//             display: "flex",
-//             alignItems: "center",
-//             justifyContent: "center",
-//             boxShadow:
-//               device.connection_status === "online"
-//                 ? "0 0 12px rgba(0, 200, 83, 0.4)"
-//                 : "none",
-//           }}
-//         >
-//           <Icons.Power />
-//         </div>
-//         <div style={{ textAlign: "right" }}>
-//           <div style={{ fontSize: 12, fontWeight: 600, color: "#00e676" }}>
-//             {device.manufacturer} {device.device_type}
-//           </div>
-//           <div style={{ fontSize: 10, color: "#6b7280" }}>
-//             ⏱ {timeAgo(device.last_location_time)} · FW{" "}
-//             {device.firmware_version}
-//           </div>
-//         </div>
-//         <div
-//           style={{
-//             display: "flex",
-//             gap: 10,
-//             fontSize: 11,
-//             color: "#525252",
-//             borderLeft: "1px solid #333",
-//             paddingLeft: 16,
-//             marginLeft: 8,
-//           }}
-//         >
-//           <span>▣ 0</span>
-//           <span>⚡ 0</span>
-//           <span>⚙ 0</span>
-//           <span>⊞ 0</span>
-//         </div>
-//       </div>
-
-//       {/* Tabs */}
-//       <div
-//         style={{
-//           display: "flex",
-//           background: "#1e1e1e",
-//           borderBottom: "1px solid #333",
-//           overflow: "auto",
-//           flexShrink: 0,
-//         }}
-//       >
-//         {visibleTabs.map((tab) => (
-//           <button
-//             key={tab.key}
-//             onClick={() => setSelectedTab(tab.key)}
-//             style={{
-//               display: "flex",
-//               alignItems: "center",
-//               gap: 6,
-//               padding: "10px 18px",
-//               border: "none",
-//               cursor: "pointer",
-//               background:
-//                 selectedTab === tab.key ? "#2a2a2a" : "transparent",
-//               color: selectedTab === tab.key ? "#f1f5f9" : "#6b7280",
-//               borderBottom:
-//                 selectedTab === tab.key
-//                   ? "2px solid #00e676"
-//                   : "2px solid transparent",
-//               fontSize: 11,
-//               fontWeight: 600,
-//               letterSpacing: 0.5,
-//               fontFamily: "inherit",
-//               whiteSpace: "nowrap",
-//               transition: "all 0.15s",
-//             }}
-//             onMouseEnter={(e) => {
-//               if (selectedTab !== tab.key) e.currentTarget.style.color = "#d4d4d8";
-//             }}
-//             onMouseLeave={(e) => {
-//               if (selectedTab !== tab.key) e.currentTarget.style.color = "#6b7280";
-//             }}
-//           >
-//             <tab.icon />
-//             {tab.label}
-//           </button>
-//         ))}
-//       </div>
-
-//       {/* Tab content */}
-//       <div style={{ flex: 1, overflow: "auto" }}>
-//         {selectedTab === "info" && <InfoTab device={device} customer={customer} />}
-//         {selectedTab === "edit" && <EditTab device={device} customers={customers} onSaved={(updatedDevice) => {
-//           onDeviceUpdated?.(updatedDevice);
-//         }} 
-//         onDeleted={() => {
-//           onClose(); // close the detail panel
-//           // Parent should refresh device list
-//           onDeviceDeleted?.();
-//         }}
-//         />}
-//         {selectedTab === "telemetry" && <TelemetryTab telemetry={telemetry} lastUpdate={lastUpdate} device={device} customerType={customerType}/>}
-//         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
-//         {selectedTab === "analytics" && <AnalyticsTab device={device} />}
-//         {selectedTab === "commands" && (
-//           <CommandsTab device={device} /> 
-//         )}
-//         {selectedTab === "config" && (
-//           <TeltonikaConfigurator device={device} /> 
-//         )}
-//         {selectedTab === "map" && <MapTab device={device} />}
-//         {selectedTab === "logs" && <LogsTab device={device} />}
-//         {selectedTab === "settings" && <SettingsTab device={device} />}
-//       </div>
-//     </div>
-//   );
-// }
 "use client";
 
 import React, { useState } from "react";
@@ -288,6 +49,24 @@ export function DeviceDetail({
   const customer = customers.find((c) => c.id === device.customer_id);
   const isOnline = device.connection_status === "online";
 
+  // ── "Last seen" must come from the SERVER clock ──────────────────────────
+  // last_location_time is the timestamp INSIDE the AVL record — i.e. the
+  // device's own RTC. Units with an unsynced clock report wildly wrong dates
+  // (e.g. IMEI 352592579879552 streams live data stamped Aug 2024), which made
+  // actively-connected devices display as "last seen 702d ago".
+  // last_contact_at is stamped with NOW() by the ingest service on every packet.
+  // Falls back to last_location_time for rows predating that column.
+  const lastContact = device.last_contact_at || device.last_location_time;
+
+  // Surface a bad device clock instead of letting it silently confuse things.
+  const clockDriftMs =
+    device.last_contact_at && device.last_location_time
+      ? new Date(device.last_contact_at).getTime() -
+        new Date(device.last_location_time).getTime()
+      : 0;
+  const hasClockDrift = Math.abs(clockDriftMs) > 24 * 60 * 60 * 1000;
+  const driftDays = Math.round(Math.abs(clockDriftMs) / (24 * 60 * 60 * 1000));
+
   const tabs = [
     { key: "info" as DeviceTab, label: "INFO", icon: Icons.Info },
     { key: "edit" as DeviceTab, label: "EDIT", icon: Icons.Edit },
@@ -304,10 +83,29 @@ export function DeviceDetail({
   const visibleTabs = customerType
     ? tabs.filter((tab) => getAllowedTabs(customerType).includes(tab.key))
     : tabs;
-  
-    if (device.protocol === "nano") {
-      return <NanoDeviceDetail device={device} onClose={onClose} customers={customers} customerType={customerType} />;
-    }
+
+  if (device.protocol === "nano") {
+    return <NanoDeviceDetail device={device} onClose={onClose} customers={customers} customerType={customerType} />;
+  }
+
+  const clockDriftChip = hasClockDrift ? (
+    <span
+      title={`Device clock is off by about ${driftDays} days. Telemetry timestamps come from the device, so stored records carry the wrong date. Last contact shown is from the server clock.`}
+      style={{
+        fontSize: 9,
+        fontWeight: 700,
+        color: "#fbbf24",
+        background: "rgba(251,191,36,0.12)",
+        border: "1px solid rgba(251,191,36,0.3)",
+        padding: "1px 6px",
+        borderRadius: 4,
+        whiteSpace: "nowrap",
+        cursor: "help",
+      }}
+    >
+      ⚠ CLOCK OFF {driftDays}d
+    </span>
+  ) : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -403,8 +201,9 @@ export function DeviceDetail({
               {device.manufacturer} {device.device_type}
             </span>
             <span style={{ fontSize: 10, color: "#6b7280" }}>
-              ⏱ {timeAgo(device.last_location_time)}
+              ⏱ {timeAgo(lastContact)}
             </span>
+            {clockDriftChip}
           </div>
         </div>
       ) : (
@@ -473,8 +272,9 @@ export function DeviceDetail({
             <div style={{ fontSize: 12, fontWeight: 600, color: "#00e676" }}>
               {device.manufacturer} {device.device_type}
             </div>
-            <div style={{ fontSize: 10, color: "#6b7280" }}>
-              ⏱ {timeAgo(device.last_location_time)} · FW {device.firmware_version}
+            <div style={{ fontSize: 10, color: "#6b7280", display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+              <span>⏱ {timeAgo(lastContact)} · FW {device.firmware_version}</span>
+              {clockDriftChip}
             </div>
           </div>
           <div
