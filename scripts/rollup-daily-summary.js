@@ -18,13 +18,17 @@
 //                     MIN(timestamp): the raw tables contain device-RTC values
 //                     ranging from 1970 to 2185, so the true minimum is
 //                     meaningless as a floor.
+//   --changed-only    skip device-days whose raw data has not changed since the
+//                     summary was last computed. Two indexed MAX() lookups
+//                     instead of a ~3.8s recompute — use this for the frequent
+//                     cron, or a full-fleet pass will saturate a 1 vCPU host.
 //   --concurrency N   parallel device-days (default 1). Raise carefully: this
 //                     shares max_connections with the app and the GPS ingest.
 //   --dry-run         list the work, touch nothing.
 //
 // Cron (server local time; adjust if the host is not on IST):
-//   */15 * * * *  cd /srv/app && node scripts/rollup-daily-summary.js --today   >> /var/log/rollup.log 2>&1
-//   20   0 * * *  cd /srv/app && node scripts/rollup-daily-summary.js --days 3  >> /var/log/rollup.log 2>&1
+//   */15 * * * *  cd /srv/app && node scripts/rollup-daily-summary.js --today --changed-only >> /var/log/rollup.log 2>&1
+//   20   0 * * *  cd /srv/app && node scripts/rollup-daily-summary.js --days 3              >> /var/log/rollup.log 2>&1
 //
 // The nightly --days 3 pass exists because packets arrive late: a device out of
 // coverage can deliver yesterday's records today. Re-running is free (the
@@ -72,6 +76,7 @@ function parseArgs(argv) {
       case "--from":        args.from = next(); break;
       case "--to":          args.to = next(); break;
       case "--device":      args.device = next(); break;
+      case "--changed-only": args.changedOnly = true; break;
       case "--max-days":    args.maxDays = parseInt(next(), 10); break;
       case "--concurrency": args.concurrency = parseInt(next(), 10); break;
       case "--help": case "-h": args.help = true; break;
@@ -172,6 +177,46 @@ async function resolveDevices(pool, args) {
   return r.rows;
 }
 
+// ── Skip device-days that cannot have changed ───────────────────────────────
+// A full refresh costs ~3.8s per device-day on this hardware, so a frequent
+// cron over the whole fleet is expensive. This check is two indexed MAX()
+// lookups (both covered by the existing device_id+timestamp indexes) and lets
+// us skip any device that has not reported since we last computed the row.
+//
+// Returns true when the row is missing, or when raw data arrived after the
+// summary was computed. Errs toward refreshing: any doubt returns true.
+const NEEDS_REFRESH_SQL = `
+  WITH w AS (
+    SELECT ($2::date::timestamp       AT TIME ZONE 'Asia/Kolkata') AS win_start,
+           (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata') AS win_end
+  ),
+  existing AS (
+    SELECT computed_at FROM device_daily_summary
+     WHERE device_id = $1 AND day = $2::date
+  ),
+  newest AS (
+    SELECT GREATEST(
+             (SELECT MAX(timestamp) FROM io_records, w
+               WHERE device_id = $1 AND timestamp >= w.win_start AND timestamp < w.win_end),
+             (SELECT MAX(timestamp) FROM gps_records, w
+               WHERE device_id = $1 AND timestamp >= w.win_start AND timestamp < w.win_end)
+           ) AS raw_max
+  )
+  SELECT
+    NOT EXISTS (SELECT 1 FROM existing)                      -- never computed
+    OR (SELECT raw_max FROM newest) IS NULL                  -- no data: cheap anyway
+    OR (SELECT raw_max FROM newest) > (SELECT computed_at FROM existing)
+    AS needs_refresh`;
+
+async function needsRefresh(pool, deviceId, day) {
+  try {
+    const r = await pool.query(NEEDS_REFRESH_SQL, [deviceId, day]);
+    return r.rows[0].needs_refresh !== false;
+  } catch {
+    return true; // never let the check itself cause a stale summary
+  }
+}
+
 // ── Bounded-concurrency worker pool ─────────────────────────────────────────
 async function runPool(tasks, concurrency, worker) {
   let cursor = 0;
@@ -233,8 +278,14 @@ async function main() {
     }
 
     let done = 0;
+    let unchanged = 0;
     await runPool(tasks, args.concurrency, async ({ device, day }) => {
       try {
+        if (args.changedOnly && !(await needsRefresh(pool, device.id, day))) {
+          unchanged++;
+          done++;
+          return;
+        }
         const r = await pool.query(
           `SELECT refresh_device_daily_summary($1::uuid, $2::date) AS written`,
           [device.id, day]
@@ -257,7 +308,10 @@ async function main() {
     });
 
     const secs = ((Date.now() - started) / 1000).toFixed(1);
-    console.log(`[rollup] done in ${secs}s — ${ok} written, ${skipped} skipped, ${failed} failed`);
+    console.log(
+      `[rollup] done in ${secs}s — ${ok} written, ${skipped} skipped, ${failed} failed` +
+        (args.changedOnly ? `, ${unchanged} unchanged` : "")
+    );
     return failed > 0 ? 1 : 0;
   } finally {
     await pool.end();
