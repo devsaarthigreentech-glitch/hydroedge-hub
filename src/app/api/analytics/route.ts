@@ -340,6 +340,78 @@
 // }
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { resolveWindow } from "@/lib/analytics-window";
+
+// ── Serve from the daily rollup when we can ─────────────────────────────────
+// device_daily_summary is maintained by scripts/rollup-daily-summary.js and is
+// keyed by IST calendar day, so it can only answer whole-day windows. Requests
+// with a time-of-day component fall through to the live scan below.
+//
+// The fuel-method preference (CAN rate over tank-level) is applied here rather
+// than baked into the table, so both figures stay available and changing our
+// mind never needs a re-run of the rollup.
+async function serveFromSummary(deviceId: string, days: string[]) {
+  const result = await query(
+    `SELECT day,
+            distance_km,
+            fuel_litres_level,
+            fuel_litres_can,
+            can_fuel_readings,
+            is_partial,
+            computed_at
+       FROM device_daily_summary
+      WHERE device_id = $1
+        AND day = ANY($2::date[])
+        AND (distance_km > 0 OR fuel_litres_level > 0 OR fuel_litres_can > 0)
+      ORDER BY day DESC`,
+    [deviceId, days]
+  );
+
+  const dailyData = result.rows.map((r) => {
+    const distance = parseFloat(String(r.distance_km ?? 0));
+    const canFuel = parseFloat(String(r.fuel_litres_can ?? 0));
+    const levelFuel = parseFloat(String(r.fuel_litres_level ?? 0));
+    // Mirrors the live path: prefer CAN only when it actually has readings.
+    const readings = parseInt(String(r.can_fuel_readings ?? 0), 10);
+    const fuelConsumed = readings > 0 && canFuel > 0 ? canFuel : levelFuel;
+
+    return {
+      day: (r.day as Date).toISOString().split("T")[0],
+      distance_km: distance,
+      fuel_litres: fuelConsumed,
+      fuel_average_kmpl:
+        fuelConsumed > 0 ? parseFloat((distance / fuelConsumed).toFixed(2)) : null,
+    };
+  });
+
+  const totalDistance = dailyData.reduce((s, d) => s + d.distance_km, 0);
+  const totalFuel = dailyData.reduce((s, d) => s + d.fuel_litres, 0);
+
+  // Recomputed from totals, never averaged from the daily averages.
+  const overallAverage =
+    totalFuel > 0 ? parseFloat((totalDistance / totalFuel).toFixed(2)) : null;
+
+  const stale = result.rows.some((r) => r.is_partial);
+  const computedAt = result.rows.reduce<string | null>((oldest, r) => {
+    const t = (r.computed_at as Date).toISOString();
+    return oldest === null || t < oldest ? t : oldest;
+  }, null);
+
+  return NextResponse.json({
+    success: true,
+    data: dailyData,
+    summary: {
+      total_distance_km: parseFloat(totalDistance.toFixed(2)),
+      total_fuel_litres: parseFloat(totalFuel.toFixed(2)),
+      overall_fuel_average_kmpl: overallAverage,
+      days_with_data: dailyData.length,
+    },
+    // Lets the UI show "as of ..." and lets us tell the two paths apart in prod.
+    source: "daily_summary",
+    includes_partial_day: stale,
+    computed_at: computedAt,
+  });
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -350,6 +422,20 @@ export async function GET(request: NextRequest) {
 
   if (!device_id) {
     return NextResponse.json({ error: "device_id required" }, { status: 400 });
+  }
+
+  // `?live=1` forces the raw scan — useful for verifying the rollup agrees.
+  const forceLive = searchParams.get("live") === "1";
+  const window = resolveWindow(searchParams);
+
+  if (!forceLive && window.mode === "summary") {
+    try {
+      return await serveFromSummary(device_id, window.days);
+    } catch (error) {
+      // A missing table or a not-yet-backfilled range must not break the tab —
+      // fall through to the live query it replaced.
+      console.error("Daily summary read failed, falling back to live query:", error);
+    }
   }
 
   // Look up device type to determine correct mileage IO ID
@@ -549,6 +635,7 @@ export async function GET(request: NextRequest) {
         overall_fuel_average_kmpl: overallAverage,
         days_with_data: dailyData.length,
       },
+      source: "live",
     });
   } catch (error) {
     console.error("Analytics API error:", error);
