@@ -1,49 +1,76 @@
 -- ============================================================================
 -- 002_analytics_source_indexes.sql
 -- ----------------------------------------------------------------------------
--- Indexes the daily rollup needs on the RAW tables.
+-- ONE index, on io_records. Revised after inspecting the live schema.
 --
--- The summary table moves analytics cost off the click path, but the rollup job
--- itself still reads io_records / gps_records filtered by device + IO + time
--- window, once per device per day. Without these it degrades to a full table
--- scan per device-day, and a nightly job over ~80 devices will not finish.
+-- What already exists (do NOT duplicate these):
+--   gps_records  idx_gps_device_timestamp  (device_id, timestamp DESC)
+--   io_records   idx_io_device_timestamp   (device_id, timestamp DESC)
+--   io_records   idx_io_device_io_id       (device_id, io_id)
 --
--- ⚠ RUN THESE ONE AT A TIME, NOT IN A TRANSACTION.
---    CREATE INDEX CONCURRENTLY cannot run inside a transaction block. If you
---    paste this whole file into psql it will fail — psql wraps multi-statement
---    input only when you use -1/--single-transaction, so run it WITHOUT that
---    flag, or execute each statement separately.
+-- The gps_records index the rollup needs is already there. A DESC index serves
+-- an ASC range scan perfectly well — Postgres just walks it backwards — so
+-- there is nothing to add for gps_records.
 --
---    CONCURRENTLY keeps writes flowing while the index builds. On a large
---    io_records this can take a long while; it is safe to leave running.
---    If a build is interrupted it leaves an INVALID index behind — check with
---    the query at the bottom and DROP before retrying.
+-- io_records is the gap. Every rollup read is "one device, ONE io_id, a
+-- one-day window":
+--     WHERE device_id = ? AND io_id = 16 AND timestamp >= ? AND timestamp < ?
+-- Neither existing index serves that well:
+--   * (device_id, io_id) finds every row this device ever reported for that IO
+--     — years of history — then filters by time with a heap fetch per row.
+--   * (device_id, timestamp DESC) finds the day, then discards every row whose
+--     io_id doesn't match. The rollup reads 5 different io_ids per day, so this
+--     scans the day's rows five times over.
+-- Putting timestamp third gives an exact range scan and drops both problems.
 --
--- Check what already exists before running:
---    SELECT indexname, indexdef FROM pg_indexes
---     WHERE tablename IN ('io_records','gps_records');
+-- ⚠ BEFORE RUNNING — this table is 46 GB with 314,879,991 rows, on a 1 vCPU /
+--   1 GB host. Consequences:
+--
+--   1. DISK. The build needs room for a new index (expect roughly 8–12 GB) and
+--      does not reuse the old one. Check first:
+--          df -h /var/lib/postgresql
+--      Do not start this without several times the expected index size free.
+--
+--   2. TIME. Hours, not minutes, on this hardware. Run it inside tmux/screen so
+--      a dropped SSH session doesn't matter — the client dying mid-build leaves
+--      an INVALID index behind.
+--
+--   3. MEMORY. The default maintenance_work_mem (64MB) makes this much slower.
+--      Raising it just for the build is worth it, but 1 GB total RAM is the
+--      ceiling — do not exceed ~256MB:
+--          SET maintenance_work_mem = '256MB';
+--      (session-local; apply-migration.js runs each statement on a pooled
+--      connection, so set it in the same psql session as the CREATE INDEX, or
+--      set it globally in postgresql.conf and reload.)
+--
+--   4. CONCURRENTLY is used so writes keep flowing — the GPS ingest must not
+--      stall for hours. The cost is that it cannot run inside a transaction:
+--          node scripts/apply-migration.js db/migrations/002_analytics_source_indexes.sql --no-transaction
+--
+-- If a build is interrupted it leaves an INVALID index. Find and drop it:
+--   SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+--    WHERE NOT i.indisvalid;
+--   DROP INDEX CONCURRENTLY idx_io_records_device_io_ts;
 -- ============================================================================
 
--- Covers every io_records access pattern in the rollup:
---   odometer (io 16/216), fuel level (107), engine state (1), CAN rate (18),
---   ignition (239) — all "one device, one io_id, a time window".
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_io_records_device_io_ts
   ON io_records (device_id, io_id, timestamp);
 
--- The GPS track scan: one device, a time window, in timestamp order.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_gps_records_device_ts
-  ON gps_records (device_id, timestamp);
-
--- ── Verify ──────────────────────────────────────────────────────────────────
--- Find failed CONCURRENTLY builds (these must be dropped and retried):
---   SELECT c.relname
+-- ── After it completes ──────────────────────────────────────────────────────
+-- Confirm it is valid and actually used:
+--   SELECT c.relname, i.indisvalid
 --     FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
---    WHERE NOT i.indisvalid;
+--    WHERE c.relname = 'idx_io_records_device_io_ts';
 --
--- Confirm the rollup uses them:
---   EXPLAIN ANALYZE SELECT MAX(io_value::numeric) - MIN(io_value::numeric)
+--   EXPLAIN (ANALYZE, BUFFERS)
+--   SELECT MAX(io_value::numeric) - MIN(io_value::numeric)
 --     FROM io_records
 --    WHERE device_id = '<uuid>' AND io_id = 16
 --      AND timestamp >= '2026-07-30T00:00:00+05:30'
 --      AND timestamp <  '2026-07-31T00:00:00+05:30';
---   -- want: Index Scan / Bitmap Index Scan, not Seq Scan
+--   -- want: Index Scan using idx_io_records_device_io_ts
+--
+-- Once it is confirmed in use, idx_io_device_io_id (device_id, io_id) becomes
+-- a redundant prefix of this index and is only costing you write throughput and
+-- ~GBs of disk. Consider dropping it — but verify nothing else depends on it:
+--   SELECT idx_scan FROM pg_stat_user_indexes WHERE indexrelname = 'idx_io_device_io_id';

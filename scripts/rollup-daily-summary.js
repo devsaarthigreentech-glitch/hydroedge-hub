@@ -10,11 +10,15 @@
 //   node scripts/rollup-daily-summary.js --today            # current IST day
 //   node scripts/rollup-daily-summary.js --days 3           # last 3 IST days
 //   node scripts/rollup-daily-summary.js --from 2026-01-01 --to 2026-07-31
-//   node scripts/rollup-daily-summary.js --backfill         # all history
+//   node scripts/rollup-daily-summary.js --backfill         # last 180 days
 //   node scripts/rollup-daily-summary.js --device <uuid> --days 7
 //
 // Flags:
-//   --concurrency N   parallel device-days (default 2). Raise carefully: this
+//   --max-days N      backfill window, default 180. NOT derived from
+//                     MIN(timestamp): the raw tables contain device-RTC values
+//                     ranging from 1970 to 2185, so the true minimum is
+//                     meaningless as a floor.
+//   --concurrency N   parallel device-days (default 1). Raise carefully: this
 //                     shares max_connections with the app and the GPS ingest.
 //   --dry-run         list the work, touch nothing.
 //
@@ -50,7 +54,9 @@ function loadEnv() {
 
 // ── Args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const args = { concurrency: 2 };
+  // Default 1: the database host is a 1 vCPU box also serving the app and the
+  // GPS ingest. Parallel rollups there cause contention, not throughput.
+  const args = { concurrency: 1 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -66,6 +72,7 @@ function parseArgs(argv) {
       case "--from":        args.from = next(); break;
       case "--to":          args.to = next(); break;
       case "--device":      args.device = next(); break;
+      case "--max-days":    args.maxDays = parseInt(next(), 10); break;
       case "--concurrency": args.concurrency = parseInt(next(), 10); break;
       case "--help": case "-h": args.help = true; break;
       default: throw new Error(`Unknown argument: ${a}`);
@@ -117,7 +124,16 @@ async function resolveDays(pool, args) {
   }
 
   if (args.backfill) {
-    // Oldest raw record decides how far back there is anything to summarise.
+    // MIN(timestamp) CANNOT be trusted as the backfill floor. These tables carry
+    // device-RTC values with no sanity clamp — gps_records starts at 1970-01-01
+    // and io_records runs to 2185. Planning from the raw minimum would schedule
+    // ~20,000 days x every device and never finish.
+    //
+    // So the floor is an explicit window (--max-days, default 180) and the raw
+    // minimum only ever shortens it.
+    const maxDays = args.maxDays || 180;
+    const floor = addDays(today, -(maxDays - 1));
+
     const r = await pool.query(`
       SELECT LEAST(
                (SELECT MIN(timestamp) FROM io_records),
@@ -125,8 +141,17 @@ async function resolveDays(pool, args) {
              ) AS oldest`);
     const oldest = r.rows[0] && r.rows[0].oldest;
     if (!oldest) throw new Error("No raw records found — nothing to backfill");
-    const firstDay = new Date(oldest).toLocaleDateString("en-CA", { timeZone: IST });
-    return dayRange(firstDay, today);
+
+    const rawFirstDay = new Date(oldest).toLocaleDateString("en-CA", { timeZone: IST });
+    const start = rawFirstDay > floor ? rawFirstDay : floor;
+
+    if (rawFirstDay < floor) {
+      console.log(
+        `[rollup] oldest raw record is ${rawFirstDay}; capping backfill at ${maxDays} days ` +
+        `(from ${start}). Override with --max-days N or --from/--to.`
+      );
+    }
+    return dayRange(start, today);
   }
 
   throw new Error("Pick one of --today, --days N, --from/--to, or --backfill");
