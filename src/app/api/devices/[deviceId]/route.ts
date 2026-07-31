@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, sim_number, customer_id, notes, tested, name_lock } = body;
+        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -92,6 +92,26 @@ export async function PATCH(
             values.push(asset_name);
             paramCount++;
           }
+
+        // Free-text label for the physical asset this unit is installed on.
+        // Purely descriptive — it plays no part in the naming gate below.
+        if (asset_type !== undefined) {
+            if (asset_type !== null && typeof asset_type !== 'string') {
+                return NextResponse.json(
+                    { success: false, error: 'Asset type series must be text' },
+                    { status: 400 }
+                );
+            }
+            if (asset_type && asset_type.length > 100) {
+                return NextResponse.json(
+                    { success: false, error: 'Asset type series is too long (max 100 characters)' },
+                    { status: 400 }
+                );
+            }
+            updates.push(`asset_type = $${paramCount}`);
+            values.push(asset_type ? asset_type.trim() : null);
+            paramCount++;
+        }
 
         if(sim_number !== undefined){
             updates.push(`sim_number = $${paramCount}`);

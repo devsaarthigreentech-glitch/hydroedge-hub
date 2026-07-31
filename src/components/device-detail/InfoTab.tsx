@@ -4,7 +4,7 @@ import React from "react";
 import { Device, Customer } from "@/types";
 import { formatTimestamp } from "@/lib/utils";
 import { THEME } from "@/lib/theme";
-import { getAssetSeries, getAssetLabel, getSeriesPattern, parseSeriesName } from "@/lib/asset-series";
+import { getAssetSeries, getAssetLabel } from "@/lib/asset-series";
 
 interface InfoTabProps {
   device: Device;
@@ -55,10 +55,9 @@ function Pill({ text, tone }: { text: string; tone: "on" | "off" | "warn" }) {
 }
 
 export function InfoTab({ device, customer }: InfoTabProps) {
-  // Mirrors the Edit tab: asset_name stores the asset TYPE, which drives the
-  // naming series. Show the friendly label plus the series it maps to.
+  // Mirrors the Edit tab: asset_name stores the asset TYPE (EOW/DG/...), while
+  // asset_type holds the free-text label for the asset the unit sits on.
   const series = getAssetSeries(device.asset_name);
-  const assignedSeries = parseSeriesName(device.device_name);
   const isTested = !!device.tested;
   const isLocked = !!device.name_locked;
 
@@ -69,7 +68,7 @@ export function InfoTab({ device, customer }: InfoTabProps) {
       color: THEME.primary[500],
       bgColor: THEME.primary[50],
       rows: [
-        { label: "Device Name", value: device.device_name || "—", mono: !!assignedSeries },
+        { label: "Device Name", value: device.device_name || "—" },
         { label: "IMEI", value: device.imei, mono: true },
         { label: "Type", value: `${device.manufacturer} ${device.device_type}` },
         { label: "Protocol", value: device.protocol || "—" },
@@ -77,59 +76,11 @@ export function InfoTab({ device, customer }: InfoTabProps) {
       ],
     },
     {
-      title: "Naming & Commissioning",
+      title: "Commissioning",
       icon: "🏷️",
       color: THEME.secondary[500],
       bgColor: THEME.secondary[50],
       rows: [
-        {
-          label: "Asset Type Series",
-          node: series ? (
-            <span style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span
-                style={{
-                  padding: "3px 10px",
-                  borderRadius: 6,
-                  background: THEME.primary[500],
-                  color: "white",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  fontFamily: "JetBrains Mono, monospace",
-                  letterSpacing: 1,
-                }}
-              >
-                {series.code}
-              </span>
-              {series.brand && <span style={{ fontWeight: 600 }}>{series.brand}</span>}
-              <span
-                style={{
-                  color: THEME.text.secondary,
-                  fontFamily: "JetBrains Mono, monospace",
-                  fontSize: 13,
-                }}
-              >
-                {assignedSeries && assignedSeries.code === series.code
-                  ? device.device_name
-                  : getSeriesPattern(series)}
-              </span>
-            </span>
-          ) : (
-            <span style={{ color: THEME.text.tertiary }}>— No series (asset type not set) —</span>
-          ),
-        },
-        {
-          label: "Series Number",
-          node: assignedSeries ? (
-            <span style={{ fontFamily: "JetBrains Mono, monospace" }}>
-              #{assignedSeries.number}{" "}
-              <span style={{ color: THEME.text.tertiary, fontFamily: "inherit", fontSize: 13 }}>
-                (assigned {assignedSeries.period.slice(0, 2)}/{assignedSeries.period.slice(2)})
-              </span>
-            </span>
-          ) : (
-            <span style={{ color: THEME.text.tertiary }}>Not yet assigned</span>
-          ),
-        },
         {
           label: "Tested",
           node: isTested ? <Pill text="✓ TESTED" tone="on" /> : <Pill text="NOT TESTED" tone="off" />,
@@ -147,6 +98,7 @@ export function InfoTab({ device, customer }: InfoTabProps) {
       bgColor: THEME.accent[50],
       rows: [
         { label: "Asset Type", value: getAssetLabel(device.asset_name) },
+        { label: "Asset Type Series", value: device.asset_type || "—" },
         {
           label: "Health Monitoring",
           node: series?.healthMonitoring ? (
@@ -155,7 +107,6 @@ export function InfoTab({ device, customer }: InfoTabProps) {
             <Pill text="NOT APPLICABLE" tone="off" />
           ),
         },
-        { label: "Asset Label", value: device.asset_type || "—" },
         { label: "Customer", value: customer?.name || "Unassigned" },
         { label: "Tags", value: device.tags?.join(", ") || "—" },
       ],
