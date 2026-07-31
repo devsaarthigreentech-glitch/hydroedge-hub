@@ -351,6 +351,8 @@ import { resolveWindow } from "@/lib/analytics-window";
 // than baked into the table, so both figures stay available and changing our
 // mind never needs a re-run of the rollup.
 async function serveFromSummary(deviceId: string, days: string[]) {
+  // Deliberately NOT filtered to rows with data — we need the raw row count to
+  // check coverage below.
   const result = await query(
     `SELECT day,
             distance_km,
@@ -362,12 +364,32 @@ async function serveFromSummary(deviceId: string, days: string[]) {
        FROM device_daily_summary
       WHERE device_id = $1
         AND day = ANY($2::date[])
-        AND (distance_km > 0 OR fuel_litres_level > 0 OR fuel_litres_can > 0)
       ORDER BY day DESC`,
     [deviceId, days]
   );
 
-  const dailyData = result.rows.map((r) => {
+  // ── Coverage gate ─────────────────────────────────────────────────────────
+  // The rollup writes a row for EVERY device-day it computes, including days
+  // with no activity at all. So a missing row means "not rolled up yet", never
+  // "nothing happened". Without this check, asking for 90 days when only 30 are
+  // backfilled would return 30 days of totals presented as the full 90 —
+  // under-reported, with nothing in the response to reveal it.
+  //
+  // Returning null makes the caller fall back to the live query, which is slow
+  // but correct. Extending the backfill is what makes the fast path apply.
+  if (result.rows.length < days.length) {
+    return null;
+  }
+
+  const dailyData = result.rows
+    // Match the live route, which only emits days that produced a metric.
+    .filter(
+      (r) =>
+        parseFloat(String(r.distance_km ?? 0)) > 0 ||
+        parseFloat(String(r.fuel_litres_level ?? 0)) > 0 ||
+        parseFloat(String(r.fuel_litres_can ?? 0)) > 0
+    )
+    .map((r) => {
     const distance = parseFloat(String(r.distance_km ?? 0));
     const canFuel = parseFloat(String(r.fuel_litres_can ?? 0));
     const levelFuel = parseFloat(String(r.fuel_litres_level ?? 0));
@@ -430,10 +452,15 @@ export async function GET(request: NextRequest) {
 
   if (!forceLive && window.mode === "summary") {
     try {
-      return await serveFromSummary(device_id, window.days);
+      const served = await serveFromSummary(device_id, window.days);
+      if (served) return served;
+      // null = the rollup does not cover the whole window. Correctness beats
+      // speed: fall through and compute it live.
+      console.info(
+        `[analytics] rollup does not cover ${window.days.length} day(s) for ${device_id}; using live query`
+      );
     } catch (error) {
-      // A missing table or a not-yet-backfilled range must not break the tab —
-      // fall through to the live query it replaced.
+      // A missing table must not break the tab — fall through to the live query.
       console.error("Daily summary read failed, falling back to live query:", error);
     }
   }

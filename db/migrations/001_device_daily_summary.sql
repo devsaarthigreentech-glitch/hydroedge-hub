@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS device_daily_summary (
   -- ── Provenance ────────────────────────────────────────────────────────────
   gps_points            INTEGER       NOT NULL DEFAULT 0,
   mileage_io_id         SMALLINT,          -- which odometer IO was used
+  ignition_io_id        SMALLINT,          -- 239 (Ignition) or 1 (DIN1) fallback
   device_type           TEXT,              -- snapshot: formula depends on it
   is_partial            BOOLEAN       NOT NULL DEFAULT FALSE,  -- day not yet closed
   computed_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
@@ -95,6 +96,7 @@ DECLARE
   v_end         TIMESTAMPTZ;
   v_device_type TEXT;
   v_mileage_io  INT;
+  v_ignition_io INT;
   v_is_fmb150   BOOLEAN;
   v_is_partial  BOOLEAN;
 BEGIN
@@ -114,6 +116,24 @@ BEGIN
   v_is_fmb150  := (v_device_type = 'FMB150');
   v_is_partial := (v_end > NOW());
 
+  -- Ignition source: IO 239 (Ignition) where available, else IO 1 (DIN1).
+  -- Not every unit is configured to report 239 — SGT-GD-0226-0015 reports DIN1
+  -- only, which made it roll up 2,518 km with zero trips and zero idle events
+  -- because both are derived from ignition transitions. DIN1 carries the same
+  -- signal on this hardware, so fall back to it rather than reporting nothing.
+  --
+  -- Chosen per device-day, not per device: a unit reconfigured mid-history then
+  -- rolls up correctly on both sides of the change.
+  IF EXISTS (
+    SELECT 1 FROM io_records
+     WHERE device_id = p_device_id AND io_id = 239
+       AND timestamp >= v_start AND timestamp < v_end
+  ) THEN
+    v_ignition_io := 239;
+  ELSE
+    v_ignition_io := 1;
+  END IF;
+
   INSERT INTO device_daily_summary AS s (
     device_id, day,
     distance_km, gps_distance_km,
@@ -121,7 +141,7 @@ BEGIN
     trip_count, trip_duration_min,
     idle_minutes, idle_events, idle_fuel_rate_lph, idle_fuel_rate_source,
     max_speed_kmh, avg_speed_kmh,
-    gps_points, mileage_io_id, device_type, is_partial, computed_at
+    gps_points, mileage_io_id, ignition_io_id, device_type, is_partial, computed_at
   )
   WITH
   -- ── Odometer distance: cumulative counter, so MAX-MIN over the day ────────
@@ -249,7 +269,7 @@ BEGIN
            LAG(io_value::int) OVER (ORDER BY timestamp) AS prev_state
       FROM io_records
      WHERE device_id = p_device_id
-       AND io_id     = 239
+       AND io_id     = v_ignition_io
        AND timestamp >= v_start AND timestamp < v_end
   ),
   -- Only transitions matter; consecutive duplicates are noise.
@@ -307,7 +327,7 @@ BEGIN
     SELECT timestamp, io_value::int AS state
       FROM io_records
      WHERE device_id = p_device_id
-       AND io_id     = 239
+       AND io_id     = v_ignition_io
        AND timestamp >= v_start - INTERVAL '2 days' AND timestamp < v_end
   ),
   merged AS (
@@ -397,6 +417,7 @@ BEGIN
     ROUND(gps_stats.avg_speed, 1),
     gps_stats.points::int,
     v_mileage_io,
+    v_ignition_io,
     v_device_type,
     v_is_partial,
     NOW()
@@ -420,6 +441,7 @@ BEGIN
     avg_speed_kmh         = EXCLUDED.avg_speed_kmh,
     gps_points            = EXCLUDED.gps_points,
     mileage_io_id         = EXCLUDED.mileage_io_id,
+    ignition_io_id        = EXCLUDED.ignition_io_id,
     device_type           = EXCLUDED.device_type,
     is_partial            = EXCLUDED.is_partial,
     computed_at           = EXCLUDED.computed_at;
