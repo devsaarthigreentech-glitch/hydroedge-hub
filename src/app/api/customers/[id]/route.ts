@@ -391,7 +391,7 @@ export async function PATCH(
       "customer_type", "status", "plan_type", "max_devices",
       "contact_person_name", "contact_person_email", "contact_person_phone",
       "address_line1", "address_line2", "city", "state", "country",
-      "postal_code", "notes", "timezone",
+      "postal_code", "notes", "timezone", "notifications_enabled",
     ];
 
     const setClauses: string[] = [];

@@ -61,9 +61,11 @@ export async function GET(req: NextRequest) {
         u.role, u.customer_id, u.status,
         u.last_login_at, u.created_at, u.updated_at,
         u.preferred_language, u.timezone,
+        COALESCE(u.notifications_enabled, TRUE) AS notifications_enabled,
         c.name AS customer_name,
         c.company_name AS customer_company,
-        c.customer_type
+        c.customer_type,
+        COALESCE(c.notifications_enabled, TRUE) AS customer_notifications_enabled
       FROM users u
       LEFT JOIN customers c ON c.id = u.customer_id
       WHERE u.deleted_at IS NULL

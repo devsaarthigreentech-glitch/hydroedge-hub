@@ -90,6 +90,10 @@ export function TopBar({
           <span style={{ fontSize: 13, fontWeight: 600, color: THEME.text.primary }}>Users</span>
         )}
 
+        {currentView === "notifications" && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: THEME.text.primary }}>Notifications</span>
+        )}
+
         {selectedDevice && (
           <>
             {!isMobile && <span style={{ color: THEME.text.tertiary, fontSize: 13 }}>/</span>}

@@ -18,6 +18,9 @@ interface User {
   customer_company: string | null;
   customer_type: string | null;
   timezone: string;
+  notifications_enabled: boolean;
+  /** Company-level switch — when off, this user is muted no matter their own. */
+  customer_notifications_enabled: boolean;
 }
 
 interface UserListProps {
@@ -99,6 +102,28 @@ export function UserList({ customers, onAddUser }: UserListProps) {
       }
     } catch (e) {
       console.error("Delete failed:", e);
+    }
+  }
+
+  // Alert-email switch. Mirrors the Notifications screen so a single user can be
+  // muted without leaving this page; the company switch still overrides it.
+  async function handleToggleNotifications(user: User) {
+    const next = !user.notifications_enabled;
+    const rollback = users;
+    setUsers((prev) =>
+      prev.map((u) => (u.id === user.id ? { ...u, notifications_enabled: next } : u))
+    );
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "user", id: user.id, enabled: next }),
+      });
+      const json = await res.json();
+      if (!json.success) setUsers(rollback);
+    } catch (e) {
+      console.error("Toggle notifications failed:", e);
+      setUsers(rollback);
     }
   }
 
@@ -325,6 +350,39 @@ export function UserList({ customers, onAddUser }: UserListProps) {
                 >
                   {user.status}
                 </div>
+
+                {/* Alert emails */}
+                {(() => {
+                  const mutedByCompany = user.customer_id && !user.customer_notifications_enabled;
+                  const on = user.notifications_enabled && !mutedByCompany;
+                  const title = !user.customer_id
+                    ? "Not linked to a company — receives no alert emails"
+                    : mutedByCompany
+                    ? `${user.customer_name} is unsubscribed, so this user gets no alert emails`
+                    : on
+                    ? "Receiving alert emails — click to unsubscribe"
+                    : "Unsubscribed from alert emails — click to subscribe";
+
+                  return (
+                    <button
+                      onClick={() => handleToggleNotifications(user)}
+                      disabled={!user.customer_id || !!mutedByCompany}
+                      title={title}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "4px 10px", borderRadius: 8,
+                        border: `1px solid ${on ? "rgba(34,197,94,0.3)" : BORDER}`,
+                        background: on ? "rgba(34,197,94,0.1)" : "#f8fafc",
+                        color: on ? GREEN : "#94a3b8",
+                        fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+                        letterSpacing: 0.5, fontFamily: "inherit", whiteSpace: "nowrap",
+                        cursor: !user.customer_id || mutedByCompany ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {on ? "🔔" : "🔕"} {mutedByCompany ? "Company off" : on ? "Alerts on" : "Alerts off"}
+                    </button>
+                  );
+                })()}
 
                 {/* Last login */}
                 <div style={{ fontSize: 11, color: "#94a3b8", minWidth: 70, textAlign: "right" }}>

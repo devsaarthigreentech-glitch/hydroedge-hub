@@ -181,6 +181,13 @@ export function Sidebar({
             onClick={() => handleNavClick("users")}
             count={userCount}
           />
+          <NavButton
+            icon={<Icons.Bell />}
+            label="Notifications"
+            isActive={currentView === "notifications"}
+            isOpen={showLabels}
+            onClick={() => handleNavClick("notifications")}
+          />
         </div>
 
         {/* Quick Filters — clicking opens Customer Detail */}

@@ -2652,6 +2652,12 @@ import { sendBatchAlertEmail, DeviceAlert } from "@/lib/email";
 //   - Data older than 3 days  → still run alarms but flag as stale in logs
 //   - No IO records at all    → send "no data" alert
 //
+// Who gets emailed (all three must be ON — see migration 004):
+//   customers.notifications_enabled       company-wide switch
+//   users.notifications_enabled           per-person switch
+//   device_alert_settings.alerts_enabled  per-device switch
+//   Manage them from the Notifications screen or PATCH /api/notifications.
+//
 // Params:
 //   ?test_to=you@email.com   — redirects all emails to you (test mode, skips cooldown)
 //   ?customer_id=uuid        — scan only one customer's devices
@@ -2670,6 +2676,18 @@ const HOUR_MS           = 60 * 60 * 1000;
 const DAY_MS            = 24 * HOUR_MS;
 const STALE_WARN_DAYS   = 3;         // flag as stale, still run alarms
 const STALE_BLOCK_DAYS  = 7;         // suppress operational alarms, send no-data alert
+
+// ── Water-shortage accumulator tuning ────────────────────────────────────────
+// The accumulator's resolution is the scan interval, so these assume the scan
+// runs every ~5 minutes. Two consequences worth knowing before changing the
+// cron: the counter lags real engine-on time by up to one interval per engine
+// restart (deliberately — see tickWaterShort), and the clear buffer must stay
+// several intervals wide or it stops buffering anything.
+const WATER_SUSTAINED_SECONDS       = 60 * 60;  // engine-on time before alarming
+const WATER_CLEAR_BUFFER_SECONDS    = 15 * 60;  // clear must hold this long to reset
+const WATER_MAX_TICK_CREDIT_SECONDS = 10 * 60;  // cap credited by any single scan
+const WATER_MAX_DATA_AGE_MS         = 30 * 60 * 1000; // older telemetry cannot vouch for "now"
+const WATER_EPISODE_EXPIRY_MS       = 7 * DAY_MS;     // untouched episodes stop counting
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2719,37 +2737,146 @@ function getDeviceModel(device: any): string {
 }
 
 // ─── Sustained water short tracking (DB-backed) ───────────────────────────────
+//
+// A water alarm fires only once the condition has held for a full hour of
+// ENGINE-ON time. The clock is an accumulator, not a wall-clock stopwatch:
+//
+//   engine on  + condition true   add the time since the previous scan
+//   engine on  + condition false  hold the total and run a clear buffer; the
+//                                 total is discarded only once the condition
+//                                 has stayed clear for WATER_CLEAR_BUFFER_
+//                                 SECONDS, so a noisy float switch cannot wipe
+//                                 out an hour of real evidence with one blip
+//   engine off / telemetry stale  pause — nothing added, nothing discarded
+//
+// So 15 minutes of running, a shutdown, then another 20 minutes leaves the
+// counter at 35 minutes rather than restarting at 20.
 
-async function getWaterShortSince(client: any, deviceId: string, signal: "cell" | "bubbler" | "tank"): Promise<number | null> {
-  try {
-    const r = await client.query(
-      `SELECT first_seen_at FROM device_water_short_log WHERE device_id = $1 AND signal = $2 AND cleared_at IS NULL LIMIT 1`,
-      [deviceId, signal]
-    );
-    return r.rows.length ? new Date(r.rows[0].first_seen_at).getTime() : null;
-  } catch { return null; }
+type WaterSignal = "cell" | "bubbler" | "tank";
+
+interface WaterTick {
+  deviceId: string;
+  signal: WaterSignal;
+  /** The shortage condition reads true right now. */
+  active: boolean;
+  /** Time may be credited: engine running and telemetry recent. */
+  countable: boolean;
+  /** This model actually has the sensor. */
+  applicable: boolean;
 }
 
-async function setWaterShortStart(client: any, deviceId: string, signal: "cell" | "bubbler" | "tank"): Promise<void> {
+async function closeWaterEpisode(client: any, id: number): Promise<void> {
+  await client.query(
+    `UPDATE device_water_short_log SET cleared_at = NOW(), updated_at = NOW() WHERE id = $1`,
+    [id]
+  );
+}
+
+/** Advances one signal's accumulator and returns its total engine-on seconds. */
+async function tickWaterShort(client: any, tick: WaterTick): Promise<number> {
+  const { deviceId, signal, active, countable, applicable } = tick;
+
   try {
+    const existing = await client.query(
+      `SELECT id, short_seconds, clear_seconds, last_tick_at, updated_at
+         FROM device_water_short_log
+        WHERE device_id = $1 AND signal = $2 AND cleared_at IS NULL
+        LIMIT 1`,
+      [deviceId, signal]
+    );
+
+    let row = existing.rows[0];
+
+    // A model without this sensor should not be carrying an episode at all.
+    if (!applicable) {
+      if (row) await closeWaterEpisode(client, row.id);
+      return 0;
+    }
+
+    // An episode nothing has touched in a week says nothing about today.
+    if (row && Date.now() - new Date(row.updated_at).getTime() > WATER_EPISODE_EXPIRY_MS) {
+      await closeWaterEpisode(client, row.id);
+      row = undefined;
+    }
+
+    // Engine off, or telemetry too old to describe the present: freeze. Dropping
+    // last_tick_at is what stops the next scan from crediting the whole gap.
+    if (!countable) {
+      if (row && row.last_tick_at !== null) {
+        await client.query(
+          `UPDATE device_water_short_log SET last_tick_at = NULL, updated_at = NOW() WHERE id = $1`,
+          [row.id]
+        );
+      }
+      return row ? row.short_seconds : 0;
+    }
+
+    // Credit the time since the previous countable scan, capped so a stalled
+    // cron cannot hand over hours in one tick.
+    //
+    // The first scan after a pause credits nothing: the engine restarted
+    // somewhere inside that gap and we cannot say where, so crediting the whole
+    // interval would count engine-off time. That biases the counter low by up
+    // to one scan interval per restart, which delays an alarm slightly rather
+    // than inventing one — the safe direction for a fault that dispatches an
+    // engineer. Shorten the cron if you want the counter to track more closely.
+    const credit = row?.last_tick_at
+      ? Math.min(
+          Math.round((Date.now() - new Date(row.last_tick_at).getTime()) / 1000),
+          WATER_MAX_TICK_CREDIT_SECONDS
+        )
+      : 0;
+
+    if (active) {
+      if (!row) {
+        await client.query(
+          `INSERT INTO device_water_short_log
+             (device_id, signal, first_seen_at, short_seconds, clear_seconds, last_tick_at, updated_at)
+           VALUES ($1, $2, NOW(), 0, 0, NOW(), NOW())
+           ON CONFLICT (device_id, signal) WHERE cleared_at IS NULL DO NOTHING`,
+          [deviceId, signal]
+        );
+        return 0;
+      }
+
+      const total = row.short_seconds + credit;
+      await client.query(
+        `UPDATE device_water_short_log
+            SET short_seconds = $2, clear_seconds = 0, last_tick_at = NOW(), updated_at = NOW()
+          WHERE id = $1`,
+        [row.id, total]
+      );
+      return total;
+    }
+
+    // Condition reads false while the engine runs — the only case that may reset
+    // the counter, and only after the clear buffer has been satisfied.
+    if (!row) return 0;
+
+    const clearTotal = row.clear_seconds + credit;
+    if (clearTotal >= WATER_CLEAR_BUFFER_SECONDS) {
+      await closeWaterEpisode(client, row.id);
+      return 0;
+    }
+
     await client.query(
-      `INSERT INTO device_water_short_log (device_id, signal, first_seen_at) VALUES ($1, $2, NOW()) ON CONFLICT (device_id, signal) WHERE cleared_at IS NULL DO NOTHING`,
-      [deviceId, signal]
+      `UPDATE device_water_short_log
+          SET clear_seconds = $2, last_tick_at = NOW(), updated_at = NOW()
+        WHERE id = $1`,
+      [row.id, clearTotal]
     );
-  } catch { /* table may not exist yet */ }
+    return row.short_seconds;
+  } catch {
+    // Table missing or unreadable — never block the rest of the alarm set.
+    return 0;
+  }
 }
 
-async function clearWaterShort(client: any, deviceId: string, signal: "cell" | "bubbler" | "tank"): Promise<void> {
-  try {
-    await client.query(
-      `UPDATE device_water_short_log SET cleared_at = NOW() WHERE device_id = $1 AND signal = $2 AND cleared_at IS NULL`,
-      [deviceId, signal]
-    );
-  } catch { /* table may not exist yet */ }
-}
-
-function sustained(sinceMs: number | null): boolean {
-  return sinceMs !== null && Date.now() - sinceMs >= HOUR_MS;
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 // ─── FMC650 alarm logic ───────────────────────────────────────────────────────
@@ -2759,7 +2886,8 @@ async function computeAlarmsFMC650(
   records: IoRecord[],
   model: string,
   deviceId: string,
-  setCurrent: number | null
+  setCurrent: number | null,
+  dataAgeMs: number
 ): Promise<Alarm[]> {
   const alarms: Alarm[] = [];
 
@@ -2775,13 +2903,26 @@ async function computeAlarmsFMC650(
   const label       = isEOW ? "engine" : "DG set";
   const hasMainTank = model === "380KVA" || model === "625KVA" || model === "EOW";
 
-  // Update sustained timers
-  if (isRunning && din2 === 0)                             await setWaterShortStart(client, deviceId, "cell");
-  else                                                     await clearWaterShort(client, deviceId, "cell");
-  if (isRunning && hasMainTank && din4 === 0)              await setWaterShortStart(client, deviceId, "bubbler");
-  else                                                     await clearWaterShort(client, deviceId, "bubbler");
-  if (isRunning && hasMainTank && ain3 !== null && ain3 > 20) await setWaterShortStart(client, deviceId, "tank");
-  else                                                     await clearWaterShort(client, deviceId, "tank");
+  // Advance the water accumulators. Time is only credited while the engine runs
+  // and the telemetry is recent enough to describe the present; otherwise the
+  // totals are held, not discarded.
+  const countable = isRunning && dataAgeMs <= WATER_MAX_DATA_AGE_MS;
+
+  const cellSeconds = await tickWaterShort(client, {
+    deviceId, signal: "cell",
+    active: din2 === 0,
+    countable, applicable: true,
+  });
+  const bubblerSeconds = await tickWaterShort(client, {
+    deviceId, signal: "bubbler",
+    active: din4 === 0,
+    countable, applicable: hasMainTank,
+  });
+  const tankSeconds = await tickWaterShort(client, {
+    deviceId, signal: "tank",
+    active: ain3 !== null && ain3 > 20,
+    countable, applicable: hasMainTank,
+  });
 
   // Always
   if (din1 === 0 && ain1A !== null && ain1A > 2)
@@ -2812,20 +2953,20 @@ async function computeAlarmsFMC650(
         message: `Abnormal: ${label} is ON but output current very low (${ain1A} A)`,
         action: "Contact Saarthi Support immediately" });
 
-    // Water alarms — 1hr sustained
-    if (isRunning && din2 === 0 && sustained(await getWaterShortSince(client, deviceId, "cell")))
+    // Water alarms — 1hr of accumulated engine-on time, not 1hr of wall clock
+    if (isRunning && din2 === 0 && cellSeconds >= WATER_SUSTAINED_SECONDS)
       alarms.push({ id: "electrolyser_water_short", severity: "critical",
-        message: "Internal electrolyser water shortage (sustained 1+ hour)",
+        message: `Internal electrolyser water shortage (${formatDuration(cellSeconds)} of engine-on time)`,
         action: "Contact Saarthi Support immediately" });
 
-    if (isRunning && hasMainTank && din4 === 0 && sustained(await getWaterShortSince(client, deviceId, "bubbler")))
+    if (isRunning && hasMainTank && din4 === 0 && bubblerSeconds >= WATER_SUSTAINED_SECONDS)
       alarms.push({ id: "bubbler_water_short", severity: "critical",
-        message: "Internal bubbler water shortage (sustained 1+ hour)",
+        message: `Internal bubbler water shortage (${formatDuration(bubblerSeconds)} of engine-on time)`,
         action: "Contact Saarthi Support immediately" });
 
-    if (isRunning && hasMainTank && ain3 !== null && ain3 > 20 && sustained(await getWaterShortSince(client, deviceId, "tank")))
+    if (isRunning && hasMainTank && ain3 !== null && ain3 > 20 && tankSeconds >= WATER_SUSTAINED_SECONDS)
       alarms.push({ id: "main_tank_short", severity: "warning",
-        message: "Main water tank level is low (sustained 1+ hour)",
+        message: `Main water tank level is low (${formatDuration(tankSeconds)} of engine-on time)`,
         action: "Fill the main water tank" });
 
     if (isRunning && setCurrent !== null && ain1A !== null) {
@@ -2878,7 +3019,7 @@ export async function POST(request: NextRequest) {
         AND d.asset_name IN ('DG', 'EOW')
         AND d.deleted_at IS NULL
         AND COALESCE(das.alerts_enabled, TRUE) = TRUE
-        AND d.customer_id != '0670fea8-0d6c-4ba2-a026-0c764d7c5d67'
+        AND COALESCE(c.notifications_enabled, TRUE) = TRUE
         ${customerFilter}
     `, queryParams);
 
@@ -2886,12 +3027,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "No GreenX devices found", checked: 0, emails_sent: 0 });
     }
 
-    // 2. Fetch user emails by customer
+    // 2. Fetch user emails by customer.
+    //    Individually unsubscribed users are dropped here. If that empties a
+    //    company's list the alert still goes out with support on CC only —
+    //    to stop that entirely, mute the company instead of its people.
     const customerIds = [...new Set(devicesResult.rows.map((d: any) => d.customer_id))];
     const usersResult = await client.query(`
       SELECT customer_id, email, full_name FROM users
       WHERE customer_id = ANY($1) AND status = 'active'
         AND deleted_at IS NULL AND email IS NOT NULL AND email != ''
+        AND COALESCE(notifications_enabled, TRUE) = TRUE
     `, [customerIds]);
 
     const usersByCustomer: Record<string, { email: string; name: string }[]> = {};
@@ -2982,7 +3127,8 @@ export async function POST(request: NextRequest) {
 
       const alarms = await computeAlarmsFMC650(
         client, ioRecords, model, device.id,
-        device.set_current ? parseFloat(device.set_current) : null
+        device.set_current ? parseFloat(device.set_current) : null,
+        dataAgeMs
       );
 
       if (alarms.length === 0) {

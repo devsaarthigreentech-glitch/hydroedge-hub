@@ -778,7 +778,7 @@ function buildBatchAlertHtml(
     <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
       <p style="font-size: 11px; color: #9ca3af; margin: 0; line-height: 1.6;">
         This is an automated alert from the SGT Hydroedge health monitoring system.<br>
-        Alerts are checked every 5 minutes. You will not receive a repeat for the same alert within 30 minutes.
+        Repeat emails for the same issue on the same device are suppressed until it clears.
       </p>
     </div>
   </div>

@@ -288,7 +288,8 @@ export async function GET() {
       sql = `
         SELECT id, name, email, phone, company_name, customer_type,
                status, parent_customer_id, hierarchy_level, max_devices,
-               city, state, country, created_at, updated_at
+               city, state, country, created_at, updated_at,
+               COALESCE(notifications_enabled, TRUE) AS notifications_enabled
         FROM customers
         WHERE id = $1 AND deleted_at IS NULL
         ORDER BY name
@@ -299,7 +300,8 @@ export async function GET() {
       sql = `
         SELECT id, name, email, phone, company_name, customer_type,
                status, parent_customer_id, hierarchy_level, max_devices,
-               city, state, country, created_at, updated_at
+               city, state, country, created_at, updated_at,
+               COALESCE(notifications_enabled, TRUE) AS notifications_enabled
         FROM customers
         WHERE deleted_at IS NULL
         ORDER BY hierarchy_level, name

@@ -24,6 +24,8 @@ export interface Customer {
   city?: string;
   state?: string;
   country?: string;
+  /** Company-wide alert email switch. See db/migrations/004. */
+  notifications_enabled?: boolean;
   created_at: string;
   updated_at?: string;
 }
@@ -109,7 +111,7 @@ export interface IORecord {
 }
 
 // UI State Types
-export type ViewType = "devices" | "customers" | "telemetry" | "settings" | "users";
+export type ViewType = "devices" | "customers" | "telemetry" | "settings" | "users" | "notifications";
 export type DeviceTab = "info" | "edit" | "telemetry" | "graphs" | "commands" | "logs" | "config" | "settings" | "map" | "analytics";
 
 export interface AppState {

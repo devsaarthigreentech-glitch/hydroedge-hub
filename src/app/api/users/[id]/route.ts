@@ -20,6 +20,7 @@ export async function PATCH(
       status,
       timezone,
       password,
+      notifications_enabled,
     } = body;
 
     // Build dynamic update
@@ -34,6 +35,10 @@ export async function PATCH(
     if (customer_id !== undefined){ updates.push(`customer_id = $${idx++}`);values.push(customer_id || null); }
     if (status !== undefined)     { updates.push(`status = $${idx++}`);     values.push(status); }
     if (timezone !== undefined)   { updates.push(`timezone = $${idx++}`);   values.push(timezone); }
+    if (notifications_enabled !== undefined) {
+      updates.push(`notifications_enabled = $${idx++}`);
+      values.push(!!notifications_enabled);
+    }
 
     // Password change (hash it)
     if (password && password.length >= 6) {
@@ -53,8 +58,8 @@ export async function PATCH(
     const result = await query(
       `UPDATE users SET ${updates.join(", ")}
        WHERE id = $${idx} AND deleted_at IS NULL
-       RETURNING id, username, email, full_name, phone, role, 
-                 customer_id, status, timezone, updated_at`,
+       RETURNING id, username, email, full_name, phone, role,
+                 customer_id, status, timezone, notifications_enabled, updated_at`,
       values
     );
 
