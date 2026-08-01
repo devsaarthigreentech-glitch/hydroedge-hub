@@ -116,17 +116,25 @@ BEGIN
   v_is_fmb150  := (v_device_type = 'FMB150');
   v_is_partial := (v_end > NOW());
 
-  -- Ignition source: IO 239 (Ignition) where available, else IO 1 (DIN1).
-  -- Not every unit is configured to report 239 — SGT-GD-0226-0015 reports DIN1
-  -- only, which made it roll up 2,518 km with zero trips and zero idle events
-  -- because both are derived from ignition transitions. DIN1 carries the same
-  -- signal on this hardware, so fall back to it rather than reporting nothing.
+  -- Ignition source: IO 239 (Ignition) where it is USABLE, else IO 1 (DIN1).
+  --
+  -- Note the test is for a value of 1, not merely for the IO's presence.
+  -- SGT-GD-0226-0015 reports 239 on every packet but pinned at 0, while driving
+  -- 188 km/day — miswired or misconfigured. An existence check accepts that and
+  -- produces zero trips and zero idle events forever, because both are derived
+  -- from ignition transitions and there is never an ON edge to pair.
+  --
+  -- Requiring at least one ON reading covers all three cases: 239 absent,
+  -- 239 present but stuck low, and 239 working normally.
   --
   -- Chosen per device-day, not per device: a unit reconfigured mid-history then
-  -- rolls up correctly on both sides of the change.
+  -- rolls up correctly on both sides of the change. The cost is a day parked
+  -- with the engine off legitimately has no 239=1 row and falls through to
+  -- DIN1 — harmless, since a stationary day yields no trips either way.
   IF EXISTS (
     SELECT 1 FROM io_records
      WHERE device_id = p_device_id AND io_id = 239
+       AND io_value::numeric = 1
        AND timestamp >= v_start AND timestamp < v_end
   ) THEN
     v_ignition_io := 239;
