@@ -14,7 +14,6 @@ export const ALL_DEVICE_TABS = [
     'commands',
     'config',
     'logs',
-    'settings',
     'map'
   ] as const;
   
@@ -65,11 +64,6 @@ export const ALL_DEVICE_TABS = [
       icon: '📋',
       description: 'Device logs and messages',
     },
-    settings: {
-      label: 'Settings',
-      icon: '🔧',
-      description: 'Device settings',
-    },
     map: {
       label: 'Map',
       icon: '📍',
@@ -104,7 +98,6 @@ export const ALL_DEVICE_TABS = [
       'commands',
       'config',
       'logs',
-      'settings',
       'map'
     ],
   };

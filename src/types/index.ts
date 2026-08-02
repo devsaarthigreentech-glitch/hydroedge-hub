@@ -112,7 +112,7 @@ export interface IORecord {
 
 // UI State Types
 export type ViewType = "devices" | "customers" | "telemetry" | "settings" | "users" | "notifications";
-export type DeviceTab = "info" | "edit" | "telemetry" | "graphs" | "commands" | "logs" | "config" | "settings" | "map" | "analytics";
+export type DeviceTab = "info" | "edit" | "telemetry" | "graphs" | "commands" | "logs" | "config" | "map" | "analytics";
 
 export interface AppState {
   currentView: ViewType;

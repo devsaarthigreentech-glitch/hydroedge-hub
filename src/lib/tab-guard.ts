@@ -19,7 +19,6 @@ import { NextResponse } from 'next/server';
 const ROUTE_TO_TAB: Record<string, DeviceTab> = {
   '/api/commands': 'commands',
   '/api/devices/config': 'config',
-  '/api/devices/settings': 'settings',
   '/api/devices/edit': 'edit',
   '/api/devices/logs': 'logs',
 };

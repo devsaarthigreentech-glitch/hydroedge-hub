@@ -5,7 +5,6 @@ import { Device, Customer } from "@/types";
 import { DeviceSearchBar } from "./DeviceSearchBar";
 import { Icons } from "@/components/ui/Icons";
 import { THEME } from "@/lib/theme";
-import { timeAgo } from "@/lib/utils";
 
 interface DeviceListProps {
   devices: Device[];
@@ -96,23 +95,13 @@ export function DeviceList({
                         {device.asset_type}
                       </span>
                     )}
-                    {device.device_type && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4, flexShrink: 0,
-                        background: device.protocol === "nano" ? "rgba(124,58,237,0.12)" : THEME.secondary[100],
-                        color: device.protocol === "nano" ? "#7c3aed" : THEME.secondary[700],
-                      }}>
-                        {device.protocol === "nano" ? "NANO" : device.device_type}
-                      </span>
-                    )}
                   </div>
                   {/* Row 2: IMEI */}
                   <div style={{ fontSize: 11, color: THEME.text.tertiary, fontFamily: "monospace", marginBottom: 4 }}>
                     {device.imei}
                   </div>
-                  {/* Row 3: last seen + customer */}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: THEME.text.secondary }}>
-                    <span>{device.last_location_time ? timeAgo(device.last_location_time) : "Never"}</span>
+                  {/* Row 3: customer */}
+                  <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 11 }}>
                     <span style={{ color: THEME.text.tertiary }}>{customer?.name || "—"}</span>
                   </div>
                 </div>
@@ -126,7 +115,7 @@ export function DeviceList({
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "44px 1.5fr 90px 180px 130px 90px 1fr",
+                gridTemplateColumns: "44px 1.5fr 90px 180px 1fr",
                 gap: 12,
                 padding: "12px 20px",
                 background: THEME.background.secondary,
@@ -145,8 +134,6 @@ export function DeviceList({
               <div>Device Name</div>
               <div>Asset Type</div>
               <div>IMEI</div>
-              <div>Last Seen</div>
-              <div>Type</div>
               <div>Customer</div>
             </div>
 
@@ -160,7 +147,7 @@ export function DeviceList({
                   onClick={() => onDeviceSelect(device)}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "44px 1.5fr 90px 180px 130px 90px 1fr",
+                    gridTemplateColumns: "44px 1.5fr 90px 180px 1fr",
                     gap: 12,
                     padding: "12px 20px",
                     borderBottom: `1px solid ${THEME.border.light}`,
@@ -251,27 +238,6 @@ export function DeviceList({
                     letterSpacing: -0.3,
                   }}>
                     {device.imei}
-                  </div>
-
-                  {/* Last Seen */}
-                  <div style={{ fontSize: 12, color: THEME.text.secondary }}>
-                    {device.last_location_time ? (
-                      <span>{timeAgo(device.last_location_time)}</span>
-                    ) : (
-                      <span style={{ color: THEME.text.tertiary }}>Never</span>
-                    )}
-                  </div>
-
-                  {/* Device Type */}
-                  <div>
-                    <span style={{
-                      fontSize: 10, padding: "3px 8px", borderRadius: 4,
-                      background: device.protocol === "nano" ? "rgba(124,58,237,0.12)" : THEME.secondary[100],
-                      color: device.protocol === "nano" ? "#7c3aed" : THEME.secondary[700],
-                      fontWeight: 600, whiteSpace: "nowrap" as const,
-                    }}>
-                      {device.protocol === "nano" ? "NANO" : device.device_type}
-                    </span>
                   </div>
 
                   {/* Customer */}
