@@ -2881,6 +2881,13 @@ function formatDuration(seconds: number): string {
 
 // ─── FMC650 alarm logic ───────────────────────────────────────────────────────
 
+// Every IO that computeAlarmsFMC650 reads. The scan fetches exactly these, so a
+// new getIO() call below needs its id added here — otherwise the value silently
+// arrives as null and the alarm it feeds never fires.
+//   1 DIN1 (engine)  2 DIN2 (cell water)  4 DIN4 (bubbler water)
+//   9 AIN1 (output current)  11 AIN3 (main tank)  179 DOUT1 (remote shutdown)
+const FMC650_ALARM_IO_IDS = [1, 2, 4, 9, 11, 179];
+
 async function computeAlarmsFMC650(
   client: any,
   records: IoRecord[],
@@ -3052,30 +3059,30 @@ export async function POST(request: NextRequest) {
     for (const device of devicesResult.rows) {
       const model = getDeviceModel(device);
 
-      // Fetch latest IO records with their timestamps
-      const ioResult = await client.query(`
-        SELECT DISTINCT ON (io.io_id) io.io_id, io.io_value, io.timestamp
+      // ── Determine data freshness ──────────────────────────────────────────
+      // Newest record of any io_id. A single seek on (device_id, timestamp DESC)
+      // — the LIMIT 1 is what keeps it from touching the device's history.
+      const lastSeenResult = await client.query(`
+        SELECT io.timestamp
         FROM io_records io
         WHERE io.device_id = $1
-        ORDER BY io.io_id, io.timestamp DESC
+        ORDER BY io.timestamp DESC
+        LIMIT 1
       `, [device.id]);
 
-      // ── Determine data freshness ──────────────────────────────────────────
       let lastSeenAt: Date | null = null;
       let dataAgeMs = Infinity;
 
-      if (ioResult.rows.length > 0) {
-        const timestamps = ioResult.rows
-          .map((r: any) => new Date(r.timestamp).getTime())
-          .filter((t: number) => !isNaN(t));
-        if (timestamps.length > 0) {
-          lastSeenAt = new Date(Math.max(...timestamps));
-          dataAgeMs  = Date.now() - lastSeenAt.getTime();
+      if (lastSeenResult.rows.length > 0) {
+        const t = new Date(lastSeenResult.rows[0].timestamp).getTime();
+        if (!isNaN(t)) {
+          lastSeenAt = new Date(t);
+          dataAgeMs  = Date.now() - t;
         }
       }
 
       const isDataBlocked = dataAgeMs >= STALE_BLOCK_DAYS * DAY_MS; // 7d+
-      const hasNoData     = ioResult.rows.length === 0;
+      const hasNoData     = lastSeenResult.rows.length === 0;
 
       // ── No data at all OR data is 7d+ old → send no-data alert ───────────
       if (hasNoData || isDataBlocked) {
@@ -3121,6 +3128,38 @@ export async function POST(request: NextRequest) {
       }
 
       // ── Data is fresh (within 7 days) — run operational alarms ───────────
+      // Latest value for each IO the alarm logic reads.
+      //
+      // The obvious form — DISTINCT ON (io_id) across the whole device — walks
+      // every row that device ever reported to find the newest of each group.
+      // On a 300M-row io_records that is minutes per device.
+      //
+      // The lookback bound is doing the heavy lifting until
+      // idx_io_records_device_io_ts (device_id, io_id, timestamp) exists. With
+      // only (device_id, timestamp) available the planner scans backward in time
+      // filtering on io_id, so an IO this device never reports costs a scan of
+      // its entire history — measured at 17s for one such lookup. The bound caps
+      // that at one window's worth of rows.
+      //
+      // Reusing STALE_BLOCK_DAYS keeps it consistent: a device whose newest
+      // record is older than this is already treated as no-data above, so a
+      // signal older than this cannot describe the present either. Once the
+      // composite index is built this bound can be dropped — each lookup becomes
+      // a seek and a never-reported IO returns from an empty range.
+      const ioResult = await client.query(`
+        SELECT ids.io_id, r.io_value
+        FROM unnest($2::int[]) AS ids(io_id)
+        CROSS JOIN LATERAL (
+          SELECT io.io_value
+          FROM io_records io
+          WHERE io.device_id = $1
+            AND io.io_id = ids.io_id
+            AND io.timestamp > NOW() - INTERVAL '1 day' * $3
+          ORDER BY io.timestamp DESC
+          LIMIT 1
+        ) r
+      `, [device.id, [...FMC650_ALARM_IO_IDS], STALE_BLOCK_DAYS]);
+
       const ioRecords: IoRecord[] = ioResult.rows.map((r: any) => ({
         io_id: r.io_id, io_value: parseFloat(r.io_value),
       }));
