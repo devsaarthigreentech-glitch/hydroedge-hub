@@ -2872,6 +2872,29 @@ async function tickWaterShort(client: any, tick: WaterTick): Promise<number> {
   }
 }
 
+// ─── No-data alert backoff ───────────────────────────────────────────────────
+//
+// Operational alarms describe something happening now, so a flat daily repeat
+// suits them. "This device has been dark for 104 days" does not change between
+// one day and the next, and repeating it daily is how a customer learns to
+// filter the whole alert stream to trash.
+//
+// The repeat interval widens with the length of the outage:
+//   day 7   first notice (the device just crossed STALE_BLOCK_DAYS)
+//   day 21  +14 days
+//   day 51  +30 days, and every 30 days after that
+//
+// It never stops entirely — a unit nobody can account for should keep
+// resurfacing, just not often enough to be ignored. To silence one for good,
+// mute it in device_alert_settings or soft-delete it; that is a deliberate
+// decision someone makes, not something the alert system should infer.
+function noDataCooldownMinutes(dataAgeMs: number): number {
+  // Infinity (never reported at all) falls through to the widest interval.
+  const days = dataAgeMs / DAY_MS;
+  const repeatDays = days < 21 ? 14 : 30;
+  return repeatDays * 24 * 60;
+}
+
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.round((seconds % 3600) / 60);
@@ -3097,6 +3120,10 @@ export async function POST(request: NextRequest) {
           action:   "Check device connectivity and SIM card — device may be offline",
         };
 
+        // Backoff, not the device's flat cooldown: the longer a unit has been
+        // dark, the less often repeating it tells anyone anything new.
+        const noDataCooldown = noDataCooldownMinutes(dataAgeMs);
+
         // Cooldown check
         let shouldSkip = false;
         if (!isTestMode) {
@@ -3105,7 +3132,7 @@ export async function POST(request: NextRequest) {
             WHERE device_id = $1 AND alert_id = $2 AND resolved_at IS NULL
               AND sent_at > NOW() - INTERVAL '1 minute' * $3
             LIMIT 1
-          `, [device.id, noDataAlarm.id, device.cooldown_minutes]);
+          `, [device.id, noDataAlarm.id, noDataCooldown]);
           shouldSkip = recentCheck.rows.length > 0;
         }
 
@@ -3114,7 +3141,7 @@ export async function POST(request: NextRequest) {
             deviceId: device.id, alertId: noDataAlarm.id,
             customerId: device.customer_id, customerName: device.customer_name,
             contactName: device.contact_name || device.customer_name,
-            cooldownMinutes: device.cooldown_minutes,
+            cooldownMinutes: noDataCooldown,
             isNoData: true,
             alert: {
               deviceName: device.device_name || device.imei,
