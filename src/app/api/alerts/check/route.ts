@@ -2727,9 +2727,26 @@ function calcCurrentFMC650(records: IoRecord[]): number | null {
 
 // ─── Device model ─────────────────────────────────────────────────────────────
 
+// EOW is Engine on Wheels — a GreenDrive unit. DG is a generator — GreenX.
+//
+// asset_name is the field that carries the code. Matching only the full phrase
+// "Engine on Wheels" here is what labelled every GreenDrive email "GreenX": the
+// scan selects on asset_name IN ('DG','EOW'), so the value reaching this
+// function is always the two- or three-letter code and that branch never fired.
+//
+// asset_type currently holds vehicle registrations ("BAH 219", "KCD 9755 EURO
+// 2") rather than a type, so it will not normally match — it is checked anyway
+// because other parts of the app do treat asset_type as the type, and a row
+// written by one of those paths should still be recognised here.
+function isEngineOnWheels(value: string | null | undefined): boolean {
+  const v = (value || "").trim().toUpperCase();
+  return v === "EOW" || v === "ENGINE ON WHEELS";
+}
+
 function getDeviceModel(device: any): string {
-  const assetName = (device.asset_name || "").trim();
-  if (assetName === "Engine on Wheels") return "EOW";
+  if (isEngineOnWheels(device.asset_type) || isEngineOnWheels(device.asset_name)) {
+    return "EOW";
+  }
   const name = (device.device_name || "").toLowerCase();
   if (name.includes("1500")) return "1500KVA";
   if (name.includes("625"))  return "625KVA";
@@ -3035,7 +3052,7 @@ export async function POST(request: NextRequest) {
 
     const devicesResult = await client.query(`
       SELECT
-        d.id, d.imei, d.device_name, d.device_type, d.asset_name,
+        d.id, d.imei, d.device_name, d.device_type, d.asset_name, d.asset_type,
         d.customer_id,
         c.name AS customer_name,
         c.contact_person_name AS contact_name,
