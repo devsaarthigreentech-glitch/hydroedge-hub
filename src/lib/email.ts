@@ -587,6 +587,14 @@ export interface BatchAlertEmailData {
   customerName: string;
   alerts: DeviceAlert[];
   timestamp: string;
+  /**
+   * "digest"    — the once-a-day roundup for this company (the default).
+   * "immediate" — an urgent alert that bypassed the roundup and was sent on
+   *               detection. Worth saying so in the email, otherwise a customer
+   *               who expects one message a morning has no way to tell that
+   *               this one arriving at 3am means something different.
+   */
+  dispatchKind?: "digest" | "immediate";
 }
 
 // ============================================================================
@@ -616,8 +624,12 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
   const warnCount = data.alerts.filter((a) => a.severity === "warning").length;
   const deviceCount = new Set(data.alerts.map((a) => a.deviceImei)).size;
 
-  // Subject line summarizes the batch
-  const subject = critCount > 0
+  // Subject line summarizes the batch. An urgent send is marked so it stands
+  // out from the daily roundup in a crowded inbox.
+  const isImmediate = data.dispatchKind === "immediate";
+  const subject = isImmediate
+    ? `🚨 URGENT — ${data.alerts[0]?.message || "Critical alert"} — ${data.customerName}`
+    : critCount > 0
     ? `🔴 ${critCount} Critical Alert${critCount > 1 ? "s" : ""}${warnCount > 0 ? ` + ${warnCount} Warning${warnCount > 1 ? "s" : ""}` : ""} — ${data.customerName}`
     : `🟡 ${warnCount} Warning${warnCount > 1 ? "s" : ""} — ${data.customerName}`;
 
@@ -680,8 +692,10 @@ function buildBatchAlertHtml(
   warnCount: number,
   deviceCount: number
 ): string {
+  const isImmediate = data.dispatchKind === "immediate";
   const hasCritical = critCount > 0;
-  const headerBg = hasCritical ? "#dc2626" : "#d97706";
+  // An urgent send always reads red, whatever the severity mix underneath it.
+  const headerBg = isImmediate || hasCritical ? "#dc2626" : "#d97706";
 
   // Group alerts by device
   const byDevice: Record<string, DeviceAlert[]> = {};
@@ -752,7 +766,7 @@ function buildBatchAlertHtml(
   <!-- Header -->
   <div style="background: ${headerBg}; padding: 24px 28px; border-radius: 12px 12px 0 0;">
     <h1 style="color: white; margin: 0; font-size: 20px; font-weight: 700;">
-      ${hasCritical ? "🔴" : "🟡"} System Health Alert
+      ${isImmediate ? "🚨 Urgent Alert" : `${hasCritical ? "🔴" : "🟡"} Daily System Health Summary`}
     </h1>
     <p style="color: rgba(255,255,255,0.9); margin: 6px 0 0; font-size: 13px;">
       ${summaryParts.join(" + ")} across ${deviceCount} device${deviceCount > 1 ? "s" : ""} · ${data.customerName}
@@ -767,8 +781,11 @@ function buildBatchAlertHtml(
     </p>
 
     <p style="font-size: 13px; color: #4b5563; margin: 0 0 20px; line-height: 1.5;">
-      The following alerts were detected on your devices at
-      <strong>${new Date(data.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</strong>:
+      ${isImmediate
+        ? `This needs attention now and has been sent ahead of your daily summary. Detected at
+           <strong>${new Date(data.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</strong>:`
+        : `Here is the current status of your devices as of
+           <strong>${new Date(data.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</strong>:`}
     </p>
 
     <!-- Alert cards grouped by device -->
@@ -778,7 +795,9 @@ function buildBatchAlertHtml(
     <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
       <p style="font-size: 11px; color: #9ca3af; margin: 0; line-height: 1.6;">
         This is an automated alert from the SGT Hydroedge health monitoring system.<br>
-        Repeat emails for the same issue on the same device are suppressed until it clears.
+        ${isImmediate
+          ? "Urgent faults are sent as soon as they are detected. Everything else arrives in one daily summary."
+          : "You receive one summary a day listing every device that currently needs attention. Urgent faults are sent separately, as soon as they are detected."}
       </p>
     </div>
   </div>

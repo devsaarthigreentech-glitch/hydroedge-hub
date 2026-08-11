@@ -40,10 +40,51 @@ node scripts/apply-migration.js db/migrations/004_notification_subscriptions.sql
 node scripts/apply-migration.js db/migrations/005_water_short_accumulator.sql
 ```
 
+```bash
+node scripts/apply-migration.js db/migrations/006_daily_digest_and_power_alert.sql
+```
+
 `004` adds the subscribe/unsubscribe columns and unsubscribes Turbo Energy,
 replacing the customer-id that used to be hardcoded in the alert route. `005`
-converts the water-shortage tracker to an accumulator (see below). Both are
-idempotent — re-running changes nothing.
+converts the water-shortage tracker to an accumulator. `006` adds
+`devices.system_voltage` and `notification_log.dispatch_kind` for the daily
+digest. All are idempotent — re-running changes nothing.
+
+## How much mail a customer gets
+
+**One email per company per day**, at 09:00 IST, listing every device that
+currently needs attention. It is a status summary, not an event feed: an
+unresolved fault appears in it again tomorrow, because it still needs fixing.
+
+**One exception** goes out the moment it is detected, without waiting for the
+morning: external supply voltage collapsing. A stranded vehicle cannot wait
+until 09:00. Nothing else uses the fast lane — the list is
+`IMMEDIATE_ALERT_IDS` in the alert route, and every addition to it is another
+email that can arrive at 3am.
+
+The digest hour is `DIGEST_HOUR` in the same file. The gate asks "has this
+company had a *delivered* digest today, in `Asia/Kolkata`" — a failed send does
+not count, so an SMTP hiccup at 09:00 retries on the next scan instead of losing
+the day.
+
+Consequence worth knowing: a critical fault detected at 09:05 waits until the
+next morning. That is the trade for one predictable email a day. If something
+needs to escalate faster, add its alert id to `IMMEDIATE_ALERT_IDS`.
+
+## Low external power
+
+The threshold depends on the vehicle, so it cannot be guessed:
+
+| `devices.system_voltage` | Alerts below |
+| --- | --- |
+| 12 | 8 V |
+| 24 | 20 V |
+| unset | never — the alarm is skipped entirely |
+
+Set it per device on the **Edit** tab. Until it is set, that device has no
+low-voltage monitoring at all; the field explains this inline. The reading comes
+from Teltonika AVL id 66 (external supply, millivolts) and is checked whether or
+not the engine is running — a flat battery matters most while parked.
 
 Check the result:
 

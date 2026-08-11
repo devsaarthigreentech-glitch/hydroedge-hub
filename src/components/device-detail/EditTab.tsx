@@ -21,6 +21,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
     asset_name: device.asset_name || "",
     asset_type: device.asset_type || "",
     sim_number: device.sim_number || "",
+    system_voltage: device.system_voltage ? String(device.system_voltage) : "",
     customer_id: device.customer_id || "",
     notes: device.notes || "",
     tested: device.tested || false,
@@ -94,6 +95,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
           asset_name: formData.asset_name,
           asset_type: formData.asset_type,
           sim_number: formData.sim_number,
+          system_voltage: formData.system_voltage === "" ? null : Number(formData.system_voltage),
           customer_id: formData.customer_id,
           notes: formData.notes,
           tested: formData.tested,
@@ -258,6 +260,37 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             onFocus={focusStyle}
             onBlur={blurStyle}
           />
+        </div>
+
+        {/* System Voltage — drives the external-power alarm threshold */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>System Voltage</label>
+          <select
+            value={formData.system_voltage}
+            onChange={(e) => setFormData({ ...formData, system_voltage: e.target.value })}
+            style={{ ...inputStyle as React.CSSProperties, cursor: "pointer" }}
+            onFocus={focusStyle}
+            onBlur={blurStyle}
+          >
+            <option value="">— Not set —</option>
+            <option value="12">12 V</option>
+            <option value="24">24 V</option>
+          </select>
+          <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6, lineHeight: 1.5 }}>
+            {formData.system_voltage === "12" && (
+              <>Sends an immediate alert when external power drops below <strong>8 V</strong>.</>
+            )}
+            {formData.system_voltage === "24" && (
+              <>Sends an immediate alert when external power drops below <strong>20 V</strong>.</>
+            )}
+            {!formData.system_voltage && (
+              <>
+                Low-voltage alerts are <strong>off</strong> for this device. The threshold
+                depends on the vehicle — 8 V on a 12 V system, 20 V on a 24 V one — so it
+                cannot be checked until this is set.
+              </>
+            )}
+          </div>
         </div>
 
         {/* Assigned Customer */}

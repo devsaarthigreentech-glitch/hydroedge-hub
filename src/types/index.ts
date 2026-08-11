@@ -54,8 +54,10 @@ export interface Device {
   tags?: string[];
   created_at: string;
   updated_at?: string;
-  tested?: boolean; 
+  tested?: boolean;
   name_locked?: boolean;
+  /** Vehicle electrical system, 12 or 24 V. Drives the external-power alarm. */
+  system_voltage?: number | null;
 }
 
 // export interface TelemetryParameter {

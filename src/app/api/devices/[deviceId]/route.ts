@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock } = body;
+        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -80,6 +80,22 @@ export async function PATCH(
         // NOTE: the manual device_name update is applied AFTER the naming gate
         // below — if the gate fires it sets device_name itself, and pushing it
         // here too would produce "multiple assignments to same column".
+
+        // 12 or 24 only — anything else would silently mis-threshold the
+        // external-power alarm, so reject it here rather than let the database
+        // CHECK surface as a 500.
+        if (system_voltage !== undefined) {
+            const v = system_voltage === null || system_voltage === "" ? null : Number(system_voltage);
+            if (v !== null && v !== 12 && v !== 24) {
+                return NextResponse.json(
+                    { success: false, error: 'System voltage must be 12, 24, or empty' },
+                    { status: 400 }
+                );
+            }
+            updates.push(`system_voltage = $${paramCount}`);
+            values.push(v);
+            paramCount++;
+        }
 
         if(device_type !== undefined){
             updates.push(`device_type = $${paramCount}`);

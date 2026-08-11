@@ -2689,6 +2689,31 @@ const WATER_MAX_TICK_CREDIT_SECONDS = 10 * 60;  // cap credited by any single sc
 const WATER_MAX_DATA_AGE_MS         = 30 * 60 * 1000; // older telemetry cannot vouch for "now"
 const WATER_EPISODE_EXPIRY_MS       = 7 * DAY_MS;     // untouched episodes stop counting
 
+// ── Dispatch: one roundup a day, plus a fast lane ────────────────────────────
+// Everything a customer needs to know arrives in a single email per company per
+// day. The one exception is collapsing supply voltage, which strands a vehicle
+// and cannot wait until tomorrow morning — that goes out on detection.
+const REPORTING_TZ      = "Asia/Kolkata";
+const DIGEST_HOUR       = 9;   // local hour the daily roundup goes out
+const IO_EXTERNAL_VOLTAGE = 66; // Teltonika AVL id — external supply, millivolts
+
+// Alert ids that bypass the daily roundup. Keep this list short: every addition
+// is another email that can arrive at 3am.
+const IMMEDIATE_ALERT_IDS = new Set(["external_power_low"]);
+
+const istHourFmt = new Intl.DateTimeFormat("en-GB", {
+  timeZone: REPORTING_TZ, hour: "2-digit", hourCycle: "h23",
+});
+
+function istHour(d: Date): number {
+  return parseInt(istHourFmt.format(d), 10);
+}
+
+/** YYYY-MM-DD in reporting-local time, for "have we already sent today". */
+function istDateKey(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: REPORTING_TZ });
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface IoRecord { io_id: number; io_value: number; }
@@ -2909,7 +2934,13 @@ function noDataCooldownMinutes(dataAgeMs: number): number {
   // Infinity (never reported at all) falls through to the widest interval.
   const days = dataAgeMs / DAY_MS;
   const repeatDays = days < 21 ? 14 : 30;
-  return repeatDays * 24 * 60;
+
+  // Shave two hours so the alert re-qualifies slightly BEFORE the digest window
+  // it is aimed at. On an exact 14 days, a roundup delivered at 09:02 leaves the
+  // alert two minutes inside its cooldown at 09:00 on the target day — it slips
+  // to the next day, and to the day after that next cycle, drifting later every
+  // time. The margin only has to exceed how late a digest can run.
+  return repeatDays * 24 * 60 - 120;
 }
 
 function formatDuration(seconds: number): string {
@@ -2926,7 +2957,32 @@ function formatDuration(seconds: number): string {
 // arrives as null and the alarm it feeds never fires.
 //   1 DIN1 (engine)  2 DIN2 (cell water)  4 DIN4 (bubbler water)
 //   9 AIN1 (output current)  11 AIN3 (main tank)  179 DOUT1 (remote shutdown)
-const FMC650_ALARM_IO_IDS = [1, 2, 4, 9, 11, 179];
+const FMC650_ALARM_IO_IDS = [1, 2, 4, 9, 11, 66, 179];
+
+// External supply collapse. The threshold is meaningless without knowing the
+// vehicle: 8 V is a dead battery on a 12 V system, while a 24 V system is
+// already in trouble at 20 V. With system_voltage unset there is no honest
+// threshold to apply, so the alarm stays silent rather than guessing.
+//
+// Deliberately outside the engine-running block below — a battery that has
+// collapsed matters most while the vehicle is parked and nobody is watching.
+function externalPowerAlarm(records: IoRecord[], systemVoltage: number | null): Alarm | null {
+  if (systemVoltage !== 12 && systemVoltage !== 24) return null;
+
+  const millivolts = getIO(records, IO_EXTERNAL_VOLTAGE);
+  if (millivolts === null) return null;
+
+  const volts     = millivolts / 1000;
+  const threshold = systemVoltage === 24 ? 20 : 8;
+  if (volts >= threshold) return null;
+
+  return {
+    id:       "external_power_low",
+    severity: "critical",
+    message:  `External power ${volts.toFixed(1)} V — below the ${threshold} V limit for a ${systemVoltage} V system`,
+    action:   "Check the battery, alternator and tracker wiring — the vehicle may not restart",
+  };
+}
 
 async function computeAlarmsFMC650(
   client: any,
@@ -2934,9 +2990,14 @@ async function computeAlarmsFMC650(
   model: string,
   deviceId: string,
   setCurrent: number | null,
-  dataAgeMs: number
+  dataAgeMs: number,
+  systemVoltage: number | null
 ): Promise<Alarm[]> {
   const alarms: Alarm[] = [];
+
+  // Checked regardless of engine state — see externalPowerAlarm.
+  const powerAlarm = externalPowerAlarm(records, systemVoltage);
+  if (powerAlarm) alarms.push(powerAlarm);
 
   const din1  = getIO(records, 1);
   const din2  = getIO(records, 2);   // 0=short, 1=full
@@ -3053,7 +3114,7 @@ export async function POST(request: NextRequest) {
     const devicesResult = await client.query(`
       SELECT
         d.id, d.imei, d.device_name, d.device_type, d.asset_name, d.asset_type,
-        d.customer_id,
+        d.customer_id, d.system_voltage,
         c.name AS customer_name,
         c.contact_person_name AS contact_name,
         das.set_current,
@@ -3211,7 +3272,10 @@ export async function POST(request: NextRequest) {
       const alarms = await computeAlarmsFMC650(
         client, ioRecords, model, device.id,
         device.set_current ? parseFloat(device.set_current) : null,
-        dataAgeMs
+        dataAgeMs,
+        device.system_voltage !== null && device.system_voltage !== undefined
+          ? Number(device.system_voltage)
+          : null
       );
 
       if (alarms.length === 0) {
@@ -3220,7 +3284,15 @@ export async function POST(request: NextRequest) {
       }
 
       for (const alarm of alarms) {
-        if (!isTestMode) {
+        // Operational alarms carry no per-alert cooldown any more: the daily
+        // digest gate already limits a company to one roundup a day, and a
+        // second limiter on top of it only causes drift — an alarm sent at
+        // 09:00 yesterday would still be inside a 24h cooldown at 09:00 today
+        // and silently fall out of the roundup.
+        //
+        // Immediate alerts keep theirs, because nothing else rate-limits them
+        // and the scan runs every five minutes.
+        if (!isTestMode && IMMEDIATE_ALERT_IDS.has(alarm.id)) {
           const recentCheck = await client.query(`
             SELECT id FROM notification_log
             WHERE device_id = $1 AND alert_id = $2 AND resolved_at IS NULL
@@ -3263,37 +3335,66 @@ export async function POST(request: NextRequest) {
     }
 
     const emailResults: any[] = [];
+    const heldForDigest: any[] = [];
     const timestamp = new Date().toISOString();
+    const now       = new Date();
+    const digestWindowOpen = istHour(now) >= DIGEST_HOUR;
 
-    for (const [customerId, group] of Object.entries(byCustomer)) {
+    // Has this company already had its roundup today (reporting-local)? Only
+    // digest sends count — an urgent 3am power alert must not swallow the day's
+    // summary, which is why dispatch_kind exists.
+    async function digestAlreadySentToday(customerId: string): Promise<boolean> {
+      // email_status matters: a failed send is still logged, and counting it
+      // here would let one Gmail hiccup swallow the entire day's roundup with
+      // no retry until tomorrow. Only a delivered digest closes the gate.
+      const r = await client.query(`
+        SELECT MAX(nl.sent_at) AS last_sent
+        FROM notification_log nl
+        JOIN devices d ON d.id = nl.device_id
+        WHERE d.customer_id = $1
+          AND nl.dispatch_kind = 'digest'
+          AND nl.email_status = 'sent'
+      `, [customerId]);
+      const last = r.rows[0]?.last_sent;
+      return !!last && istDateKey(new Date(last)) === istDateKey(now);
+    }
+
+    async function dispatch(
+      customerId: string,
+      group: { customerName: string; contactName: string },
+      alerts: CollectedAlert[],
+      kind: "digest" | "immediate"
+    ) {
       const customerUsers       = usersByCustomer[customerId] || [];
       const realRecipientEmails = customerUsers.map((u) => u.email);
       const primaryContactName  = customerUsers[0]?.name || group.contactName;
-      const deviceAlerts        = group.alerts.map((ca) => ca.alert);
+      const deviceAlerts        = alerts.map((ca) => ca.alert);
 
       const emailResult = await sendBatchAlertEmail({
-        to:          isTestMode ? [testTo!] : realRecipientEmails,
-        cc:          isTestMode ? [] : undefined,
-        contactName: primaryContactName,
+        to:           isTestMode ? [testTo!] : realRecipientEmails,
+        cc:           isTestMode ? [] : undefined,
+        contactName:  primaryContactName,
         customerName: group.customerName,
-        alerts:      deviceAlerts,
+        alerts:       deviceAlerts,
         timestamp,
+        dispatchKind: kind,
       });
 
       const emailStatus = emailResult.success ? "sent" : `error: ${emailResult.error}`;
 
       if (!isTestMode) {
-        for (const ca of group.alerts) {
+        for (const ca of alerts) {
           await client.query(`
             INSERT INTO notification_log
               (device_id, alert_id, severity, message, action,
-               customer_email, customer_name, device_name, device_imei, email_status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+               customer_email, customer_name, device_name, device_imei,
+               email_status, dispatch_kind)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           `, [
             ca.deviceId, ca.alertId, ca.alert.severity,
             ca.alert.message, ca.alert.action,
             realRecipientEmails.join(", "), group.customerName,
-            ca.alert.deviceName, ca.alert.deviceImei, emailStatus,
+            ca.alert.deviceName, ca.alert.deviceImei, emailStatus, kind,
           ]);
         }
       }
@@ -3301,6 +3402,7 @@ export async function POST(request: NextRequest) {
       emailResults.push({
         customer:         group.customerName,
         customer_id:      customerId,
+        dispatch:         kind,
         alerts_count:     deviceAlerts.length,
         devices_affected: new Set(deviceAlerts.map((a) => a.deviceImei)).size,
         actual_sent_to:   emailResult.sentTo,
@@ -3315,6 +3417,37 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    for (const [customerId, group] of Object.entries(byCustomer)) {
+      const immediate = group.alerts.filter((ca) => IMMEDIATE_ALERT_IDS.has(ca.alertId));
+      const digest    = group.alerts.filter((ca) => !IMMEDIATE_ALERT_IDS.has(ca.alertId));
+
+      // Urgent first, and unconditionally — this is the whole point of the fast
+      // lane. Its own per-alert cooldown stops it repeating every five minutes.
+      if (immediate.length > 0) {
+        await dispatch(customerId, group, immediate, "immediate");
+      }
+
+      if (digest.length === 0) continue;
+
+      // Test mode shows what a roundup would contain regardless of the clock,
+      // otherwise a dry run before 09:00 would look misleadingly empty.
+      const due = isTestMode
+        || (digestWindowOpen && !(await digestAlreadySentToday(customerId)));
+
+      if (due) {
+        await dispatch(customerId, group, digest, "digest");
+      } else {
+        // Not sent and not logged, so nothing is consumed — these are simply
+        // re-evaluated on the next scan and land in the next roundup.
+        heldForDigest.push({
+          customer:     group.customerName,
+          customer_id:  customerId,
+          alerts_held:  digest.length,
+          reason:       digestWindowOpen ? "already sent today" : `before ${DIGEST_HOUR}:00 ${REPORTING_TZ}`,
+        });
+      }
+    }
+
     return NextResponse.json({
       success: true,
       ...(isTestMode       ? { test_mode: true, test_email: testTo } : {}),
@@ -3323,6 +3456,7 @@ export async function POST(request: NextRequest) {
       total_alerts: collectedAlerts.length,
       emails_sent:  emailResults.length,
       emails:       emailResults,
+      ...(heldForDigest.length > 0 ? { held_for_digest: heldForDigest } : {}),
     });
   } catch (error: any) {
     console.error("[ALERT CHECK ERROR]", error);
