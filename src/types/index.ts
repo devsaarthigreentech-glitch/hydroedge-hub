@@ -58,6 +58,13 @@ export interface Device {
   name_locked?: boolean;
   /** Vehicle electrical system, 12 or 24 V. Drives the external-power alarm. */
   system_voltage?: number | null;
+  /**
+   * Commissioned setpoint as the RAW Ain.1 value (millivolts), matching
+   * io_records.io_value for io_id 9. Deviation alarms compare raw against raw
+   * so they stay correct regardless of the amps divisor (47 on FMC650, 83 on
+   * FMB). Shown to users as amps. NULL = not commissioned; alarms suppressed.
+   */
+  set_ain1_raw?: number | null;
 }
 
 // export interface TelemetryParameter {

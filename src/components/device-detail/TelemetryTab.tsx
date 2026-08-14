@@ -522,6 +522,7 @@ export function TelemetryTab({ telemetry, lastUpdate, device,customerType }: Tel
             "380KVA"
           }
           telemetry={telemetry}
+          initialSetAin1Raw={device.set_ain1_raw ?? null}
         />
       )}
 

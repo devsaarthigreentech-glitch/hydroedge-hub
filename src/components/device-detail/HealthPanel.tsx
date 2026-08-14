@@ -1281,7 +1281,7 @@
 // }
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 // NOTE: The large commented-out legacy version that was at the top of your
@@ -1312,6 +1312,15 @@ interface GreenXHealthPanelProps {
   deviceType: string;   // "FMC650" | "FMB150" | "FMB120"
   deviceModel: string;  // "380KVA" | "625KVA" | "1500KVA" | "EOW" | "MINI"
   telemetry: TelemetryParam[];
+  /**
+   * devices.set_ain1_raw — the commissioned setpoint as a RAW Ain.1 value,
+   * loaded by the parent from the device row. Before migration 007 this lived
+   * only in component state, so it reset to "Not configured" on every page load
+   * and the deviation alarms could never fire.
+   */
+  initialSetAin1Raw?: number | null;
+  /** Called after a successful save so the parent can refresh its device copy. */
+  onSetAin1RawSaved?: (value: number | null) => void;
 }
 
 interface Alarm {
@@ -1387,6 +1396,30 @@ const FMB120_CURRENT_IO  = 9;
 const FMB120_CURRENT_DIV = 83;
 const FMB120_WATER_IO    = 6;
 
+// ─── Setpoint helpers ─────────────────────────────────────────────────────────
+// The commissioned setpoint is stored as the RAW Ain.1 value (millivolts), not
+// as amps — see migration 007. Amps are a presentation concern derived through a
+// per-hardware divisor, and the FMB120 divisor is still unconfirmed (below). If
+// the setpoint were stored in amps, correcting that divisor would silently
+// re-threshold every commissioned device. Comparing raw against raw means a
+// divisor change only alters what is displayed, never what alarms.
+
+/** Ain.1 lives on AVL IO 9 across FMC650, FMB150 and FMB120 alike. */
+const CURRENT_IO = 9;
+
+/** Deviation band applied either side of the setpoint. */
+const SETPOINT_TOLERANCE = 0.1;
+
+function currentDivisorFor(deviceType: string): number {
+  return deviceType === "FMC650" ? 47 : 83;
+}
+
+/** Convert a raw Ain.1 reading to amps for DISPLAY only. Never for comparison. */
+function rawToAmps(raw: number | null, divisor: number, decimals = 2): number | null {
+  if (raw === null) return null;
+  return parseFloat((raw / divisor).toFixed(decimals));
+}
+
 function calcCurrentFMB120(telemetry: TelemetryParam[]): number | null {
   const raw = getRawIO(telemetry, FMB120_CURRENT_IO);
   if (raw === null) return null;
@@ -1427,14 +1460,16 @@ function sustained(sinceMs: number | null): boolean {
 function computeAlarmsFMC650(
   telemetry: TelemetryParam[],
   model: string,
-  setCurrent: number | null,
+  setAin1Raw: number | null,
+  divisor: number,
   timers: FMC650Timers
 ): Alarm[] {
   const alarms: Alarm[] = [];
 
-  const din1  = getIO(telemetry, 1);
-  const din2  = getIO(telemetry, 2);   // 0=short, 1=full
-  const din4  = getIO(telemetry, 4);   // 0=short, 1=full
+  const din1    = getIO(telemetry, 1);
+  const din2    = getIO(telemetry, 2);   // 0=short, 1=full
+  const din4    = getIO(telemetry, 4);   // 0=short, 1=full
+  const ain1Raw = getRawIO(telemetry, CURRENT_IO);
   const ain1A = calcCurrentFMC650(telemetry);
   const ain3  = getIO(telemetry, 11);
   const dout1 = getIO(telemetry, 179);
@@ -1492,16 +1527,18 @@ function computeAlarmsFMC650(
         message: "Main water tank level is low (sustained 1+ hour)",
         action: "Fill the main water tank" });
 
-    // Over/under current
-    if (isRunning && setCurrent !== null && ain1A !== null) {
-      const tol = setCurrent * 0.1;
-      if (ain1A < setCurrent - tol)
+    // Over/under current.
+    // The COMPARISON is on raw Ain.1; only the MESSAGE is converted to amps.
+    if (isRunning && setAin1Raw !== null && ain1Raw !== null) {
+      const tol     = setAin1Raw * SETPOINT_TOLERANCE;
+      const setAmps = rawToAmps(setAin1Raw, divisor, 1);
+      if (ain1Raw < setAin1Raw - tol)
         alarms.push({ id: "under_current", severity: "warning",
-          message: `Running under current — ${ain1A} A (set: ${setCurrent} A)`,
+          message: `Running under current — ${ain1A} A (set: ${setAmps} A)`,
           action: "Contact Saarthi Support (±10% tolerance)" });
-      else if (ain1A > setCurrent + tol)
+      else if (ain1Raw > setAin1Raw + tol)
         alarms.push({ id: "over_current", severity: "warning",
-          message: `Running over current — ${ain1A} A (set: ${setCurrent} A)`,
+          message: `Running over current — ${ain1A} A (set: ${setAmps} A)`,
           action: "Contact Saarthi Support (±10% tolerance)" });
     }
   }
@@ -1517,12 +1554,15 @@ function computeAlarmsFMC650(
 function computeAlarmsFMB(
   telemetry: TelemetryParam[],
   calcCurrent: (t: TelemetryParam[]) => number | null,
-  waterIoId: number
+  waterIoId: number,
+  setAin1Raw: number | null,
+  divisor: number
 ): Alarm[] {
   const alarms: Alarm[] = [];
 
   const din1    = getIO(telemetry, 1);
   const ain1A   = calcCurrent(telemetry);
+  const ain1Raw = getRawIO(telemetry, CURRENT_IO);
   const ain2raw = getRawIO(telemetry, waterIoId);
   const ain2V   = ain2raw !== null ? ain2raw * 0.001 : null;
   const dout1   = getIO(telemetry, 179);
@@ -1551,15 +1591,26 @@ function computeAlarmsFMB(
         message: "Internal water level shortage",
         action: "Fill the external aux tank" });
 
+    // Over/under current — identical rule to the FMC650 path.
+    // This replaces the old hardcoded 9–11 A band (kept below for reference):
+    // that band only ever suited the MINI, and it assumed the 83 divisor was
+    // right. The COMPARISON is on raw Ain.1; only the MESSAGE is in amps.
+    if (isRunning && setAin1Raw !== null && ain1Raw !== null) {
+      const tol     = setAin1Raw * SETPOINT_TOLERANCE;
+      const setAmps = rawToAmps(setAin1Raw, divisor, 1);
+      if (ain1Raw < setAin1Raw - tol)
+        alarms.push({ id: "under_current", severity: "warning",
+          message: `Running under current — ${ain1A} A (set: ${setAmps} A)`,
+          action: "Contact Saarthi Support (±10% tolerance)" });
+      else if (ain1Raw > setAin1Raw + tol)
+        alarms.push({ id: "over_current", severity: "warning",
+          message: `Running over current — ${ain1A} A (set: ${setAmps} A)`,
+          action: "Contact Saarthi Support (±10% tolerance)" });
+    }
+
+    // Legacy hardcoded band, superseded by the configurable setpoint above:
     // if (isRunning && ain1A !== null) {
-    //   if (ain1A < 9)
-    //     alarms.push({ id: "under_current", severity: "warning",
-    //       message: `Running under current — ${ain1A} A (healthy: 9–11 A)`,
-    //       action: "Contact Saarthi Support" });
-    //   else if (ain1A > 11)
-    //     alarms.push({ id: "over_current", severity: "warning",
-    //       message: `Running over current — ${ain1A} A (healthy: 9–11 A)`,
-    //       action: "Contact Saarthi Support" });
+    //   if (ain1A < 9)  ... else if (ain1A > 11) ...
     // }
   }
 
@@ -1650,12 +1701,58 @@ function NoDataBanner({ lastSeen, isBlocked, isMobile }: {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function GreenXHealthPanel({ deviceType, deviceModel, telemetry }: GreenXHealthPanelProps) {
+export function GreenXHealthPanel({
+  deviceId,
+  deviceType,
+  deviceModel,
+  telemetry,
+  initialSetAin1Raw = null,
+  onSetAin1RawSaved,
+}: GreenXHealthPanelProps) {
   const isMobile = useIsMobile();
-  const [setCurrent, setSetCurrent] = useState<number | null>(null);
+  const [setAin1Raw, setSetAin1Raw] = useState<number | null>(initialSetAin1Raw);
   const [editing, setEditing]       = useState(false);
   const [inputVal, setInputVal]     = useState("");
   const [expanded, setExpanded]     = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
+
+  // Re-sync when the parent reloads the device (e.g. after an Edit tab save).
+  // Skipped while the user is mid-edit so a background refresh cannot wipe
+  // what they are typing.
+  useEffect(() => {
+    if (!editing) setSetAin1Raw(initialSetAin1Raw);
+  }, [initialSetAin1Raw, editing]);
+
+  /**
+   * Persist the setpoint to devices.set_ain1_raw. `value` is a RAW Ain.1
+   * reading, not amps. Local state is only updated after the server confirms,
+   * so a failed save leaves the panel showing the value that is actually
+   * stored rather than the one that was attempted.
+   */
+  async function saveSetAin1Raw(value: number | null) {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/devices/${deviceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ set_ain1_raw: value }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Could not save");
+      }
+      setSetAin1Raw(value);
+      setEditing(false);
+      setInputVal("");
+      onSetAin1RawSaved?.(value);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const cellShortSinceRef    = useRef<number | null>(null);
   const bubblerShortSinceRef = useRef<number | null>(null);
@@ -1704,6 +1801,10 @@ export function GreenXHealthPanel({ deviceType, deviceModel, telemetry }: GreenX
                   : calcCurrentFMB150(telemetry);
   const isRunning = din1 === 1 && ain1A !== null && ain1A > 2;
 
+  // Raw Ain.1 — the basis for every setpoint comparison. Amps are display only.
+  const ain1Raw        = getRawIO(telemetry, CURRENT_IO);
+  const currentDivisor = currentDivisorFor(deviceType);
+
   const hasMainTankDevice = deviceModel === "380KVA" || deviceModel === "625KVA" || isEOW;
 
   // ── Update sustained timers (only when data is fresh enough) ──────────────
@@ -1733,14 +1834,14 @@ export function GreenXHealthPanel({ deviceType, deviceModel, telemetry }: GreenX
   // ── Alarms — suppressed entirely if data is 7+ days old ──────────────────
   const alarms = isDataBlocked ? [] : (
     isFMC650
-      ? computeAlarmsFMC650(telemetry, deviceModel, setCurrent, {
+      ? computeAlarmsFMC650(telemetry, deviceModel, setAin1Raw, currentDivisor, {
           cellShortSince:    cellShortSinceRef.current,
           bubblerShortSince: bubblerShortSinceRef.current,
           tankShortSince:    tankShortSinceRef.current,
         })
       : isFMB120
-        ? computeAlarmsFMB(telemetry, calcCurrentFMB120, FMB120_WATER_IO)
-        : computeAlarmsFMB(telemetry, calcCurrentFMB150, 6)
+        ? computeAlarmsFMB(telemetry, calcCurrentFMB120, FMB120_WATER_IO, setAin1Raw, currentDivisor)
+        : computeAlarmsFMB(telemetry, calcCurrentFMB150, 6, setAin1Raw, currentDivisor)
   );
 
   const hasAlarms   = alarms.length > 0 || isDataBlocked;
@@ -1809,8 +1910,17 @@ export function GreenXHealthPanel({ deviceType, deviceModel, telemetry }: GreenX
   const miniWaterLabel = ain2V === null ? "Unknown" : ain2V <= 20 ? "OK — full" : "Low — shortage";
 
   // ── Setpoint ──────────────────────────────────────────────────────────────
-  const deviation       = setCurrent !== null && ain1A !== null ? Math.abs(ain1A - setCurrent) : null;
-  const withinTolerance = deviation !== null && setCurrent !== null ? deviation <= setCurrent * 0.1 : null;
+  // Deviation is measured on RAW Ain.1 so it is independent of the divisor.
+  // setAmps / bandLoA / bandHiA exist purely to render the band in amps.
+  const rawDeviation    = setAin1Raw !== null && ain1Raw !== null ? Math.abs(ain1Raw - setAin1Raw) : null;
+  const withinTolerance = rawDeviation !== null && setAin1Raw !== null
+    ? rawDeviation <= setAin1Raw * SETPOINT_TOLERANCE
+    : null;
+  const setAmps         = rawToAmps(setAin1Raw, currentDivisor, 1);
+  const bandLoA         = rawToAmps(setAin1Raw !== null ? setAin1Raw * (1 - SETPOINT_TOLERANCE) : null, currentDivisor, 1);
+  const bandHiA         = rawToAmps(setAin1Raw !== null ? setAin1Raw * (1 + SETPOINT_TOLERANCE) : null, currentDivisor, 1);
+  // Deviation expressed in amps, for the human-facing status line only.
+  const deviationA      = rawDeviation !== null ? rawToAmps(rawDeviation, currentDivisor, 1) : null;
   const miniHealthy     = useMiniLogic && ain1A !== null && ain1A > 2 ? ain1A >= 9 && ain1A <= 11 : null;
 
   const stale = din1 !== 1;
@@ -1915,10 +2025,151 @@ export function GreenXHealthPanel({ deviceType, deviceModel, telemetry }: GreenX
             )}
           </div>
 
-          {/* ── Setpoint / healthy range (legacy block kept commented as in your file) ── */}
-          {/* <div style={{ padding: isMobile ? "12px 14px" : "16px 20px", background: C.pageBg }}>
-            ... unchanged ...
-          </div> */}
+          {/* ── Setpoint ──────────────────────────────────────────────────────
+              Read-only display of the commissioned Set Current, with an inline
+              editor. The value is stored on devices.set_ain1_raw (migration
+              007) as a RAW Ain.1 reading and is also editable from the Edit tab
+              — both write the same field through PATCH /api/devices/[deviceId].
+              Display is in amps; the input and the alarm comparison are raw. */}
+          <div style={{ padding: isMobile ? "12px 14px" : "16px 20px", background: C.pageBg }}>
+            <SectionLabel text="Commissioned setpoint" />
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" as const }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 600, color: C.textPrimary }}>
+                  Set current
+                </div>
+                <div style={{ fontSize: 11, color: C.textSecond, marginTop: 2 }}>
+                  Rated output current — alarms outside &plusmn;10%
+                </div>
+              </div>
+
+              {/* Read-only display speaks AMPS. */}
+              {!editing && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: setAmps !== null ? C.textPrimary : C.textTertiary }}>
+                    {setAmps !== null ? `${setAmps} A` : "Not configured"}
+                  </span>
+                  <button
+                    onClick={() => { setInputVal(setAin1Raw !== null ? String(setAin1Raw) : ""); setSaveError(null); setEditing(true); }}
+                    style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.blueBorder}`, background: C.blueBg, color: C.blueText, cursor: "pointer" }}
+                  >
+                    {setAin1Raw !== null ? "Edit" : "Configure"}
+                  </button>
+                </div>
+              )}
+
+              {/* The EDITOR speaks RAW Ain.1 — that is what is stored and what the
+                  alarm compares. Amps are shown live underneath as confirmation. */}
+              {editing && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="number" min="0" max="60000" step="1" autoFocus
+                    value={inputVal}
+                    disabled={saving}
+                    onChange={(e) => setInputVal(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { const v = parseFloat(inputVal); if (!isNaN(v) && v > 0) saveSetAin1Raw(v); } if (e.key === "Escape") { setEditing(false); setSaveError(null); } }}
+                    placeholder="Ain.1 raw"
+                    style={{ width: 110, fontSize: 13, padding: "5px 8px", borderRadius: 6, border: `1px solid ${C.border}`, color: C.textPrimary }}
+                  />
+                  <button
+                    disabled={saving}
+                    onClick={() => { const v = parseFloat(inputVal); if (!isNaN(v) && v > 0) saveSetAin1Raw(v); }}
+                    style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 6, border: `1px solid ${C.greenBorder}`, background: C.greenBg, color: C.greenText, cursor: saving ? "wait" : "pointer" }}
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  {setAin1Raw !== null && (
+                    <button
+                      disabled={saving}
+                      onClick={() => saveSetAin1Raw(null)}
+                      title="Clear the setpoint and disable deviation alarms"
+                      style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: C.white, color: C.textSecond, cursor: saving ? "wait" : "pointer" }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    disabled={saving}
+                    onClick={() => { setEditing(false); setInputVal(""); setSaveError(null); }}
+                    style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 6, border: `1px solid ${C.border}`, background: C.white, color: C.textSecond, cursor: saving ? "wait" : "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Editing help — spells out that the input is a raw Ain.1 value, and
+                converts it to amps live so the engineer can sanity-check it. */}
+            {editing && (
+              <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.6, color: C.blueText, background: C.blueBg, border: `1px solid ${C.blueBorder}`, borderRadius: 6, padding: "8px 10px" }}>
+                Enter the <strong>Ain.1 raw value</strong>, not amps — the same number the
+                Telemetry tab shows as <code>ain.1 raw</code> (IO {CURRENT_IO}).
+                {(() => {
+                  const v = parseFloat(inputVal);
+                  if (isNaN(v) || v <= 0) {
+                    return <><br />Current will be calculated automatically once you enter a value.</>;
+                  }
+                  const a  = rawToAmps(v, currentDivisor, 1)!;
+                  const lo = rawToAmps(v * (1 - SETPOINT_TOLERANCE), currentDivisor, 1)!;
+                  const hi = rawToAmps(v * (1 + SETPOINT_TOLERANCE), currentDivisor, 1)!;
+                  return (
+                    <>
+                      <br />
+                      = <strong>{a} A</strong> (raw ÷ {currentDivisor}) · alarm band{" "}
+                      <strong>{lo}–{hi} A</strong>
+                    </>
+                  );
+                })()}
+                {ain1Raw !== null && (
+                  <>
+                    <br />
+                    Reading right now: <strong>{ain1Raw}</strong> raw ({ain1A} A)
+                    {!editing ? null : (
+                      <button
+                        onClick={() => setInputVal(String(ain1Raw))}
+                        style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, border: `1px solid ${C.blueBorder}`, background: C.white, color: C.blueText, cursor: "pointer" }}
+                      >
+                        Use current reading
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {saveError && (
+              <div style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: C.redText, background: C.redBg, border: `1px solid ${C.redBorder}`, borderRadius: 6, padding: "6px 10px" }}>
+                {saveError}
+              </div>
+            )}
+
+            {/* Live comparison — only meaningful while the unit is actually running.
+                Judged on raw, reported in amps. */}
+            {setAin1Raw !== null && isRunning && ain1A !== null && ain1Raw !== null && !isDataBlocked && (
+              <div style={{ marginTop: 10 }}>
+                <SignalRow
+                  label="Current vs setpoint"
+                  detail={`Target ${setAmps} A ±10% (${bandLoA}–${bandHiA} A)`}
+                  status={
+                    withinTolerance
+                      ? `${ain1A} A — within ±10%`
+                      : `${ain1A} A — ${deviationA} A ${ain1Raw < setAin1Raw ? "under" : "over"}`
+                  }
+                  ok={withinTolerance}
+                  isMobile={isMobile}
+                />
+              </div>
+            )}
+
+            {setAin1Raw === null && !editing && (
+              <div style={{ marginTop: 8, fontSize: 11, color: C.textTertiary, lineHeight: 1.5 }}>
+                Under/over-current alerts are off until this is set. It is the unit&apos;s
+                commissioned Ain.1 reading — it cannot be derived from telemetry.
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>

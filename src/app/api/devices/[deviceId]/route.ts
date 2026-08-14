@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage } = body;
+        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -94,6 +94,25 @@ export async function PATCH(
             }
             updates.push(`system_voltage = $${paramCount}`);
             values.push(v);
+            paramCount++;
+        }
+
+        // Commissioned setpoint, stored as the RAW Ain.1 value in millivolts —
+        // the same units io_records uses for io_id 9. Deviation alarms compare
+        // raw against raw so they survive a change to the amps divisor.
+        // The health panel alarms on a >10% deviation from this, so a bad value
+        // produces false alarms rather than a visible error — validate it.
+        // Empty string / null clears it, which suppresses the deviation alarms.
+        if (set_ain1_raw !== undefined) {
+            const raw = set_ain1_raw === null || set_ain1_raw === "" ? null : Number(set_ain1_raw);
+            if (raw !== null && (!Number.isFinite(raw) || raw <= 0 || raw > 60000)) {
+                return NextResponse.json(
+                    { success: false, error: 'Set point must be an Ain.1 raw value between 0 and 60000, or empty' },
+                    { status: 400 }
+                );
+            }
+            updates.push(`set_ain1_raw = $${paramCount}`);
+            values.push(raw);
             paramCount++;
         }
 
