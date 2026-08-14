@@ -22,7 +22,9 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
     asset_type: device.asset_type || "",
     sim_number: device.sim_number || "",
     system_voltage: device.system_voltage ? String(device.system_voltage) : "",
-    set_ain1_raw: device.set_ain1_raw != null ? String(device.set_ain1_raw) : "",
+    // Held in the form as VOLTS (what the user types); converted to raw
+    // millivolts on submit, which is how devices.set_ain1_raw stores it.
+    set_ain1_volts: device.set_ain1_raw != null ? String(device.set_ain1_raw / 1000) : "",
     customer_id: device.customer_id || "",
     notes: device.notes || "",
     tested: device.tested || false,
@@ -97,7 +99,10 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
           asset_type: formData.asset_type,
           sim_number: formData.sim_number,
           system_voltage: formData.system_voltage === "" ? null : Number(formData.system_voltage),
-          set_ain1_raw: formData.set_ain1_raw === "" ? null : Number(formData.set_ain1_raw),
+          // Volts in the form → raw millivolts on the wire and in the column.
+          set_ain1_raw: formData.set_ain1_volts === ""
+            ? null
+            : parseFloat((Number(formData.set_ain1_volts) * 1000).toFixed(2)),
           customer_id: formData.customer_id,
           notes: formData.notes,
           tested: formData.tested,
@@ -299,43 +304,46 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             alarm. Raw rather than amps so the threshold survives a correction to
             the amps divisor (47 on FMC650, 83 on FMB) — see migration 007. */}
         <div style={{ marginBottom: 20 }}>
-          <label style={labelStyle}>Set Point — Ain.1 raw value</label>
+          <label style={labelStyle}>Set Point — Ain.1 Voltage (V)</label>
           <input
             type="number"
             min="0"
-            max="60000"
-            step="1"
-            value={formData.set_ain1_raw}
-            onChange={(e) => setFormData({ ...formData, set_ain1_raw: e.target.value })}
-            placeholder="Ain.1 raw reading, e.g. 830 (leave empty if not commissioned)"
+            max="60"
+            step="0.001"
+            value={formData.set_ain1_volts}
+            onChange={(e) => setFormData({ ...formData, set_ain1_volts: e.target.value })}
+            placeholder="Ain.1 voltage, e.g. 0.830 (leave empty if not commissioned)"
             style={inputStyle}
             onFocus={focusStyle}
             onBlur={blurStyle}
           />
           <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6, lineHeight: 1.5 }}>
-            {formData.set_ain1_raw ? (
+            {formData.set_ain1_volts ? (
               (() => {
                 // Display-only conversion. The stored value and the alarm
-                // comparison both stay in raw Ain.1.
+                // comparison both stay in raw millivolts.
                 const divisor = formData.device_type === "FMC650" ? 47 : 83;
-                const raw = Number(formData.set_ain1_raw);
+                const volts = Number(formData.set_ain1_volts);
+                const raw = volts * 1000;
                 const amps = (raw / divisor).toFixed(1);
                 const lo = ((raw * 0.9) / divisor).toFixed(1);
                 const hi = ((raw * 1.1) / divisor).toFixed(1);
                 return (
                   <>
-                    Raw <strong>{raw}</strong> ÷ {divisor} = <strong>{amps} A</strong>.
-                    Health panel alerts when measured current leaves{" "}
-                    <strong>{lo}–{hi} A</strong> while the unit is running (±10%).
+                    <strong>{volts} V</strong> = <strong>{raw.toFixed(0)}</strong> raw (mV)
+                    ÷ {divisor} = <strong>{amps} A</strong>. Alerts fire when measured
+                    current leaves <strong>{lo}–{hi} A</strong> while the unit is running
+                    (±10%).
                   </>
                 );
               })()
             ) : (
               <>
                 Under/over-current alerts are <strong>off</strong> for this device. Enter
-                the <strong>raw Ain.1 reading</strong> (not amps) taken at commissioning —
-                the same number the Telemetry tab shows as <code>ain.1 raw</code>. Current
-                is calculated from it automatically for display.
+                the <strong>Ain.1 voltage in volts</strong> (not amps) taken at
+                commissioning — the same figure the Telemetry tab shows for{" "}
+                <code>ain.1</code>, e.g. <code>0.830</code> rather than <code>830</code>.
+                Current is calculated from it automatically.
               </>
             )}
           </div>

@@ -1420,6 +1420,22 @@ function rawToAmps(raw: number | null, divisor: number, decimals = 2): number | 
   return parseFloat((raw / divisor).toFixed(decimals));
 }
 
+// Raw Ain.1 is MILLIVOLTS — that is how io_records stores it and how the value
+// is compared. Users type VOLTS, because that is the headline figure on the
+// telemetry tile ("0.087 V", with "raw: 87" underneath). These two convert
+// between the two views; the stored value stays millivolts throughout.
+
+/** Volts as typed by a user → raw millivolts as stored. */
+function voltsToRaw(volts: number): number {
+  return parseFloat((volts * 1000).toFixed(2));
+}
+
+/** Raw millivolts as stored → volts for the input box. */
+function rawToVolts(raw: number | null): number | null {
+  if (raw === null) return null;
+  return parseFloat((raw / 1000).toFixed(3));
+}
+
 function calcCurrentFMB120(telemetry: TelemetryParam[]): number | null {
   const raw = getRawIO(telemetry, FMB120_CURRENT_IO);
   if (raw === null) return null;
@@ -2051,7 +2067,7 @@ export function GreenXHealthPanel({
                     {setAmps !== null ? `${setAmps} A` : "Not configured"}
                   </span>
                   <button
-                    onClick={() => { setInputVal(setAin1Raw !== null ? String(setAin1Raw) : ""); setSaveError(null); setEditing(true); }}
+                    onClick={() => { setInputVal(setAin1Raw !== null ? String(rawToVolts(setAin1Raw)) : ""); setSaveError(null); setEditing(true); }}
                     style={{ fontSize: 11, fontWeight: 600, padding: "4px 10px", borderRadius: 6, border: `1px solid ${C.blueBorder}`, background: C.blueBg, color: C.blueText, cursor: "pointer" }}
                   >
                     {setAin1Raw !== null ? "Edit" : "Configure"}
@@ -2059,22 +2075,24 @@ export function GreenXHealthPanel({
                 </div>
               )}
 
-              {/* The EDITOR speaks RAW Ain.1 — that is what is stored and what the
-                  alarm compares. Amps are shown live underneath as confirmation. */}
+              {/* The EDITOR speaks VOLTS — the headline figure on the telemetry
+                  tile. It is converted to raw millivolts on save, because that is
+                  what is stored and what the alarm compares. */}
               {editing && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <input
-                    type="number" min="0" max="60000" step="1" autoFocus
+                    type="number" min="0" max="60" step="0.001" autoFocus
                     value={inputVal}
                     disabled={saving}
                     onChange={(e) => setInputVal(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { const v = parseFloat(inputVal); if (!isNaN(v) && v > 0) saveSetAin1Raw(v); } if (e.key === "Escape") { setEditing(false); setSaveError(null); } }}
-                    placeholder="Ain.1 raw"
+                    onKeyDown={(e) => { if (e.key === "Enter") { const v = parseFloat(inputVal); if (!isNaN(v) && v > 0) saveSetAin1Raw(voltsToRaw(v)); } if (e.key === "Escape") { setEditing(false); setSaveError(null); } }}
+                    placeholder="Volts"
                     style={{ width: 110, fontSize: 13, padding: "5px 8px", borderRadius: 6, border: `1px solid ${C.border}`, color: C.textPrimary }}
                   />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.textSecond }}>V</span>
                   <button
                     disabled={saving}
-                    onClick={() => { const v = parseFloat(inputVal); if (!isNaN(v) && v > 0) saveSetAin1Raw(v); }}
+                    onClick={() => { const v = parseFloat(inputVal); if (!isNaN(v) && v > 0) saveSetAin1Raw(voltsToRaw(v)); }}
                     style={{ fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 6, border: `1px solid ${C.greenBorder}`, background: C.greenBg, color: C.greenText, cursor: saving ? "wait" : "pointer" }}
                   >
                     {saving ? "Saving…" : "Save"}
@@ -2104,36 +2122,37 @@ export function GreenXHealthPanel({
                 converts it to amps live so the engineer can sanity-check it. */}
             {editing && (
               <div style={{ marginTop: 10, fontSize: 11, lineHeight: 1.6, color: C.blueText, background: C.blueBg, border: `1px solid ${C.blueBorder}`, borderRadius: 6, padding: "8px 10px" }}>
-                Enter the <strong>Ain.1 raw value</strong>, not amps — the same number the
-                Telemetry tab shows as <code>ain.1 raw</code> (IO {CURRENT_IO}).
+                Enter the <strong>Ain.1 voltage in volts</strong>, not amps — the same
+                figure the Telemetry tab shows for <code>ain.1</code> (IO {CURRENT_IO}),
+                e.g. <code>0.830</code>, not <code>830</code>.
                 {(() => {
-                  const v = parseFloat(inputVal);
-                  if (isNaN(v) || v <= 0) {
+                  const volts = parseFloat(inputVal);
+                  if (isNaN(volts) || volts <= 0) {
                     return <><br />Current will be calculated automatically once you enter a value.</>;
                   }
-                  const a  = rawToAmps(v, currentDivisor, 1)!;
-                  const lo = rawToAmps(v * (1 - SETPOINT_TOLERANCE), currentDivisor, 1)!;
-                  const hi = rawToAmps(v * (1 + SETPOINT_TOLERANCE), currentDivisor, 1)!;
+                  const raw = voltsToRaw(volts);
+                  const a  = rawToAmps(raw, currentDivisor, 1)!;
+                  const lo = rawToAmps(raw * (1 - SETPOINT_TOLERANCE), currentDivisor, 1)!;
+                  const hi = rawToAmps(raw * (1 + SETPOINT_TOLERANCE), currentDivisor, 1)!;
                   return (
                     <>
                       <br />
-                      = <strong>{a} A</strong> (raw ÷ {currentDivisor}) · alarm band{" "}
-                      <strong>{lo}–{hi} A</strong>
+                      = <strong>{raw}</strong> raw (mV) = <strong>{a} A</strong>{" "}
+                      (raw ÷ {currentDivisor}) · alarm band <strong>{lo}–{hi} A</strong>
                     </>
                   );
                 })()}
                 {ain1Raw !== null && (
                   <>
                     <br />
-                    Reading right now: <strong>{ain1Raw}</strong> raw ({ain1A} A)
-                    {!editing ? null : (
-                      <button
-                        onClick={() => setInputVal(String(ain1Raw))}
-                        style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, border: `1px solid ${C.blueBorder}`, background: C.white, color: C.blueText, cursor: "pointer" }}
-                      >
-                        Use current reading
-                      </button>
-                    )}
+                    Reading right now: <strong>{rawToVolts(ain1Raw)} V</strong>{" "}
+                    ({ain1Raw} raw, {ain1A} A)
+                    <button
+                      onClick={() => setInputVal(String(rawToVolts(ain1Raw)))}
+                      style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, border: `1px solid ${C.blueBorder}`, background: C.white, color: C.blueText, cursor: "pointer" }}
+                    >
+                      Use current reading
+                    </button>
                   </>
                 )}
               </div>
@@ -2166,7 +2185,7 @@ export function GreenXHealthPanel({
             {setAin1Raw === null && !editing && (
               <div style={{ marginTop: 8, fontSize: 11, color: C.textTertiary, lineHeight: 1.5 }}>
                 Under/over-current alerts are off until this is set. It is the unit&apos;s
-                commissioned Ain.1 reading — it cannot be derived from telemetry.
+                commissioned Ain.1 voltage — it cannot be derived from telemetry.
               </div>
             )}
           </div>

@@ -2743,11 +2743,33 @@ function getIO(records: IoRecord[], ioId: number): number | null {
   return r !== undefined ? r.io_value : null;
 }
 
+// ─── Setpoint basis ───────────────────────────────────────────────────────────
+// The commissioned setpoint is stored as the RAW Ain.1 value (millivolts) on
+// devices.set_ain1_raw — see migration 007. Deviation alarms compare raw against
+// raw so they stay correct regardless of the amps divisor; amps are computed for
+// the alarm TEXT only. This mirrors HealthPanel.tsx exactly, so the emails and
+// the panel can never disagree about whether a unit is in range.
+
+/** Ain.1 lives on AVL IO 9. */
+const CURRENT_IO = 9;
+
+/** Deviation band applied either side of the setpoint. */
+const SETPOINT_TOLERANCE = 0.1;
+
+/** FMC650 current transducer divisor. FMB150/FMB120 use 83. */
+const FMC650_CURRENT_DIV = 47;
+
+/** Convert a raw Ain.1 reading to amps for DISPLAY only. Never for comparison. */
+function rawToAmps(raw: number | null, divisor: number, decimals = 1): number | null {
+  if (raw === null) return null;
+  return parseFloat((raw / divisor).toFixed(decimals));
+}
+
 // FMC650: (raw_mV * 0.001 / 47) * 1000
 function calcCurrentFMC650(records: IoRecord[]): number | null {
-  const raw = getIO(records, 9);
+  const raw = getIO(records, CURRENT_IO);
   if (raw === null) return null;
-  return parseFloat(((raw * 0.001 / 47) * 1000).toFixed(1));
+  return parseFloat(((raw * 0.001 / FMC650_CURRENT_DIV) * 1000).toFixed(1));
 }
 
 // ─── Device model ─────────────────────────────────────────────────────────────
@@ -2989,7 +3011,7 @@ async function computeAlarmsFMC650(
   records: IoRecord[],
   model: string,
   deviceId: string,
-  setCurrent: number | null,
+  setAin1Raw: number | null,
   dataAgeMs: number,
   systemVoltage: number | null
 ): Promise<Alarm[]> {
@@ -3002,7 +3024,8 @@ async function computeAlarmsFMC650(
   const din1  = getIO(records, 1);
   const din2  = getIO(records, 2);   // 0=short, 1=full
   const din4  = getIO(records, 4);   // 0=short, 1=full
-  const ain1A = calcCurrentFMC650(records);
+  const ain1A   = calcCurrentFMC650(records);
+  const ain1Raw = getIO(records, CURRENT_IO);   // basis for the setpoint comparison
   const ain3  = getIO(records, 11);
   const dout1 = getIO(records, 179);
 
@@ -3077,15 +3100,19 @@ async function computeAlarmsFMC650(
         message: `Main water tank level is low (${formatDuration(tankSeconds)} of engine-on time)`,
         action: "Fill the main water tank" });
 
-    if (isRunning && setCurrent !== null && ain1A !== null) {
-      const tol = setCurrent * 0.1;
-      if (ain1A < setCurrent - tol)
+    // Over/under current.
+    // The COMPARISON is on raw Ain.1; only the MESSAGE is converted to amps.
+    // Identical rule to HealthPanel.tsx — keep the two in step.
+    if (isRunning && setAin1Raw !== null && ain1Raw !== null) {
+      const tol     = setAin1Raw * SETPOINT_TOLERANCE;
+      const setAmps = rawToAmps(setAin1Raw, FMC650_CURRENT_DIV);
+      if (ain1Raw < setAin1Raw - tol)
         alarms.push({ id: "under_current", severity: "warning",
-          message: `Running under current — ${ain1A} A (set: ${setCurrent} A)`,
+          message: `Running under current — ${ain1A} A (set: ${setAmps} A)`,
           action: "Contact Saarthi Support (±10% tolerance)" });
-      else if (ain1A > setCurrent + tol)
+      else if (ain1Raw > setAin1Raw + tol)
         alarms.push({ id: "over_current", severity: "warning",
-          message: `Running over current — ${ain1A} A (set: ${setCurrent} A)`,
+          message: `Running over current — ${ain1A} A (set: ${setAmps} A)`,
           action: "Contact Saarthi Support (±10% tolerance)" });
     }
   }
@@ -3117,7 +3144,12 @@ export async function POST(request: NextRequest) {
         d.customer_id, d.system_voltage,
         c.name AS customer_name,
         c.contact_person_name AS contact_name,
-        das.set_current,
+        -- Setpoint now lives on devices (migration 007) as a RAW Ain.1 value.
+        -- It used to be device_alert_settings.set_current, in amps — that
+        -- column is superseded, and 007 backfills from it. Keeping the setpoint
+        -- on devices means the health panel and this scan read one field, so
+        -- the emails and the on-screen panel cannot drift apart.
+        d.set_ain1_raw,
         das.alerts_enabled,
         COALESCE(das.cooldown_minutes, ${DEFAULT_COOLDOWN}) AS cooldown_minutes
       FROM devices d
@@ -3271,7 +3303,7 @@ export async function POST(request: NextRequest) {
 
       const alarms = await computeAlarmsFMC650(
         client, ioRecords, model, device.id,
-        device.set_current ? parseFloat(device.set_current) : null,
+        device.set_ain1_raw != null ? parseFloat(device.set_ain1_raw) : null,
         dataAgeMs,
         device.system_voltage !== null && device.system_voltage !== undefined
           ? Number(device.system_voltage)
