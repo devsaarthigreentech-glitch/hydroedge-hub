@@ -1273,8 +1273,14 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
       const res = await fetch(url);
       const data = await res.json();
       if(data.success){setDailyData(data.data ?? []);setSummary(data.summary ?? null);}
-      else setError(data.error);
-    } catch { setError("Failed to fetch fuel data"); }
+      // Clear on failure. Keeping the previous result leaves the stat cards
+      // showing the OLD window's totals under the NEW range's label — numbers
+      // that look valid and are simply for a different period.
+      else {setDailyData([]);setSummary(null);setError(data.error);}
+    } catch {
+      setDailyData([]);setSummary(null);
+      setError("Failed to fetch fuel data");
+    }
     finally { setFuelLoading(false); }
   }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
 

@@ -47,6 +47,18 @@ function isIstMidnight(date: Date): boolean {
   return shifted % MS_PER_DAY === 0;
 }
 
+/** Minutes elapsed since IST midnight. */
+function istMinuteOfDay(date: Date): number {
+  const shifted = date.getTime() + IST_OFFSET_MIN * 60_000;
+  return Math.floor((((shifted % MS_PER_DAY) + MS_PER_DAY) % MS_PER_DAY) / 60_000);
+}
+
+/**
+ * 23:59 — what AnalyticsTab's date picker emits for an inclusive end-of-day
+ * (`endTime` defaults to "23:59" and toISTIso appends ":00+05:30").
+ */
+const LAST_MINUTE_OF_IST_DAY = 23 * 60 + 59;
+
 /** The IST calendar day a timestamp falls in. */
 function istDayOf(date: Date): string {
   return new Date(date.getTime() + IST_OFFSET_MIN * 60_000).toISOString().slice(0, 10);
@@ -73,11 +85,29 @@ export function resolveWindow(params: URLSearchParams, now: Date = new Date()): 
       return { mode: "live", reason: "unparseable datetime range" };
     }
     if (e <= s) return { mode: "live", reason: "end is not after start" };
-    if (!isIstMidnight(s) || !isIstMidnight(e)) {
-      return { mode: "live", reason: "range is not aligned to IST day boundaries" };
+    if (!isIstMidnight(s)) {
+      return { mode: "live", reason: "range does not start on an IST day boundary" };
     }
-    // `end` is the exclusive midnight after the last day the user wants.
-    const lastDay = addDays(istDayOf(e), -1);
+
+    // The end arrives in one of two conventions and both mean "whole days":
+    //   * exclusive — IST midnight AFTER the last day wanted
+    //   * inclusive — 23:59 on the last day, which is what the date picker in
+    //     AnalyticsTab sends. Rejecting this was why EVERY custom range fell
+    //     through to the live scan, however deeply the device was backfilled.
+    // Any other time-of-day is a genuine partial day the daily grain cannot
+    // represent, and still has to be computed live.
+    let lastDay: string;
+    if (isIstMidnight(e)) {
+      lastDay = addDays(istDayOf(e), -1);
+    } else if (istMinuteOfDay(e) === LAST_MINUTE_OF_IST_DAY) {
+      // Note this covers the whole final day, including its last 59 seconds,
+      // whereas the live path's `BETWEEN ... AND 23:59:00` stops short of them.
+      // The summary is the more correct of the two; the difference is a minute
+      // of a device-day and cannot move a daily total meaningfully.
+      lastDay = istDayOf(e);
+    } else {
+      return { mode: "live", reason: "range does not end on an IST day boundary" };
+    }
     return { mode: "summary", days: dayRange(istDayOf(s), lastDay) };
   }
 
