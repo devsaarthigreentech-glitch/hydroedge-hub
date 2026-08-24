@@ -95,6 +95,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { archiveQuery, planLogSources } from '@/lib/archive-db';
+
+// Kept as a constant because the merge below re-applies it: two sources each
+// capped at N, concatenated, re-sorted, then trimmed back to N.
+const ROW_LIMIT = 1000;
 
 export async function GET(
   request: NextRequest,
@@ -192,14 +197,53 @@ export async function GET(
       paramIdx++;
     }
 
-    sql += ` ORDER BY timestamp DESC LIMIT 1000`;
+    sql += ` ORDER BY timestamp DESC LIMIT ${ROW_LIMIT}`;
 
-    const result = await query(sql, sqlParams);
+    // ── Which database holds this window? ─────────────────────────────────
+    // Early raw history for a few devices lives on the archive box and was never
+    // imported here (see src/lib/archive-db.ts). For everything else, and for
+    // every device not explicitly listed, this resolves to production alone and
+    // behaves exactly as it did before.
+    const sources = planLogSources(deviceId, start, end);
+
+    const runs: Promise<{ rows: any[] }>[] = [];
+    if (sources.primary) runs.push(query(sql, sqlParams));
+    if (sources.archive) {
+      runs.push(
+        // Fail loudly rather than returning the production half on its own. A
+        // silently truncated log looks like "no data in that period", which is
+        // indistinguishable from a real gap — and there IS a real gap around the
+        // cutover, so the two must not be allowed to blur.
+        archiveQuery(sql, sqlParams).catch((err: any) => {
+          throw new Error(`archive database unreachable: ${err.message}`);
+        })
+      );
+    }
+
+    const results = await Promise.all(runs);
+
+    // Each side is already DESC and capped at ROW_LIMIT, so the true top
+    // ROW_LIMIT of the union is guaranteed to be inside the concatenation.
+    const rows =
+      results.length === 1
+        ? results[0].rows
+        : results
+            .flatMap((r) => r.rows)
+            .sort(
+              (a, b) =>
+                new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            )
+            .slice(0, ROW_LIMIT);
 
     return NextResponse.json({
       success: true,
-      data: result.rows,
-      count: result.rowCount,
+      data: rows,
+      count: rows.length,
+      // Lets us tell the two paths apart in production without adding logging.
+      sources: [
+        ...(sources.primary ? ['primary'] : []),
+        ...(sources.archive ? ['archive'] : []),
+      ],
     });
 
   } catch (error: any) {
