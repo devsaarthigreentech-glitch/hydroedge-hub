@@ -8,6 +8,9 @@
 //
 // Response shape:
 //   { success, data: { device, state, measured[], faults[] } }
+//
+// ?compact=1 -> device + state only (skips the registry / catalog lookups).
+//               Used by the Nano detail header for its "last seen" clock.
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -74,6 +77,44 @@ export async function GET(request: NextRequest) {
     }
     const row = stateRes.rows[0];
 
+    const device = {
+      id: row.id,
+      imei: row.imei,
+      device_name: row.device_name,
+      device_type: row.device_type,
+      manufacturer: row.manufacturer,
+      connection_status: row.connection_status,
+      protocol: row.protocol,
+    };
+
+    const state = row.state_present
+      ? {
+          online: row.online,
+          status_ts: row.status_ts,
+          net: row.net,
+          last_ts_utc: row.last_ts_utc,
+          last_seq: row.last_seq,
+          last_up: row.last_up,
+          last_boot_id: row.last_boot_id,
+          updated_at: row.updated_at,
+          gps: {
+            fix: row.gps_fix,
+            sat: row.gps_sat,
+            lat: row.last_lat,
+            lon: row.last_lon,
+          },
+          raw_d: row.raw_d,
+        }
+      : null;
+
+    // Header-only callers just need the freshness clock — skip the extra queries.
+    if (request.nextUrl.searchParams.get('compact') === '1') {
+      return NextResponse.json({
+        success: true,
+        data: { device, state, measured: [], faults: [] },
+      });
+    }
+
     // Registry lookup for the measured PIDs (name / unit / category)
     const regRes = await query(
       `SELECT pid, name, units, category, data_type
@@ -125,38 +166,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      data: {
-        device: {
-          id: row.id,
-          imei: row.imei,
-          device_name: row.device_name,
-          device_type: row.device_type,
-          manufacturer: row.manufacturer,
-          connection_status: row.connection_status,
-          protocol: row.protocol,
-        },
-        state: row.state_present
-          ? {
-              online: row.online,
-              status_ts: row.status_ts,
-              net: row.net,
-              last_ts_utc: row.last_ts_utc,
-              last_seq: row.last_seq,
-              last_up: row.last_up,
-              last_boot_id: row.last_boot_id,
-              updated_at: row.updated_at,
-              gps: {
-                fix: row.gps_fix,
-                sat: row.gps_sat,
-                lat: row.last_lat,
-                lon: row.last_lon,
-              },
-              raw_d: row.raw_d,
-            }
-          : null,
-        measured,
-        faults,
-      },
+      data: { device, state, measured, faults },
     });
   } catch (error: any) {
     console.error('Error fetching nano live snapshot:', error);

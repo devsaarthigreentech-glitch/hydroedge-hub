@@ -121,9 +121,12 @@ async function main() {
     }
 
     head("ROLLUP STATUS (device_daily_summary)");
+    // to_regprocedure, NOT to_regproc: to_regproc takes a bare function NAME and
+    // returns NULL for anything containing an argument list, so the signature
+    // form silently reported "function exists: false" even when it did exist.
     const exists = await pool.query(
       `SELECT to_regclass('public.device_daily_summary') IS NOT NULL AS t,
-              to_regproc('refresh_device_daily_summary(uuid,date)') IS NOT NULL AS f`
+              to_regprocedure('refresh_device_daily_summary(uuid,date)') IS NOT NULL AS f`
     );
     p(`  table exists   : ${exists.rows[0].t}`);
     p(`  function exists: ${exists.rows[0].f}`);

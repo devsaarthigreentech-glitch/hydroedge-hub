@@ -15,6 +15,13 @@
 //   node scripts/verify-daily-summary.js                      # 10 devices, 7 days
 //   node scripts/verify-daily-summary.js --sample 40 --days 30
 //   node scripts/verify-daily-summary.js --base http://localhost:3000
+//   node scripts/verify-daily-summary.js --device <uuid|imei|name>
+//
+// --device pins the check to one unit. Unlike the default sample it does NOT
+// require the device to already have non-zero summary rows: after a fresh
+// backfill of a single device that is exactly what you need to confirm, and
+// filtering it out would report "no devices with summary data" on the one
+// device you just rolled up.
 //
 // Requires the Next dev/prod server to be running.
 // ============================================================================
@@ -48,9 +55,44 @@ function parseArgs(argv) {
     if (argv[i] === "--sample") a.sample = parseInt(argv[++i], 10);
     else if (argv[i] === "--days") a.days = parseInt(argv[++i], 10);
     else if (argv[i] === "--base") a.base = argv[++i];
+    else if (argv[i] === "--device") a.device = argv[++i];
     else throw new Error(`Unknown argument: ${argv[i]}`);
   }
+  if (a.device === undefined && argv.includes("--device")) {
+    throw new Error("--device needs a value");
+  }
   return a;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Accepts a UUID, a full IMEI, or a device_name fragment, so you can verify the
+// unit by the identifier you actually have in front of you. Ambiguous name
+// fragments are an error rather than a silent pick of the first match.
+async function resolveDevice(pool, ident) {
+  const r = UUID_RE.test(ident)
+    ? await pool.query(
+        `SELECT id, device_name FROM devices WHERE id = $1 AND deleted_at IS NULL`,
+        [ident]
+      )
+    : await pool.query(
+        `SELECT id, device_name
+           FROM devices
+          WHERE deleted_at IS NULL
+            AND (imei = $1 OR device_name ILIKE '%' || $1 || '%')
+          ORDER BY device_name
+          LIMIT 10`,
+        [ident]
+      );
+
+  if (r.rows.length === 0) throw new Error(`Device not found: ${ident}`);
+  if (r.rows.length > 1) {
+    const names = r.rows.map((d) => `  ${d.device_name || "(unnamed)"} ${d.id}`);
+    throw new Error(
+      [`"${ident}" matches ${r.rows.length} devices:`, ...names].join("\n")
+    );
+  }
+  return r.rows;
 }
 
 async function fetchAnalytics(base, deviceId, days, live) {
@@ -84,20 +126,24 @@ async function main() {
 
   let devices;
   try {
-    // Prefer devices that actually have summary rows — comparing two empty
-    // results proves nothing.
-    const r = await pool.query(
-      `SELECT d.id, d.device_name
-         FROM devices d
-         JOIN device_daily_summary s ON s.device_id = d.id
-        WHERE d.deleted_at IS NULL
-          AND (s.distance_km > 0 OR s.fuel_litres_level > 0 OR s.fuel_litres_can > 0)
-        GROUP BY d.id, d.device_name
-        ORDER BY COUNT(*) DESC
-        LIMIT $1`,
-      [args.sample]
-    );
-    devices = r.rows;
+    if (args.device) {
+      devices = await resolveDevice(pool, args.device);
+    } else {
+      // Prefer devices that actually have summary rows — comparing two empty
+      // results proves nothing.
+      const r = await pool.query(
+        `SELECT d.id, d.device_name
+           FROM devices d
+           JOIN device_daily_summary s ON s.device_id = d.id
+          WHERE d.deleted_at IS NULL
+            AND (s.distance_km > 0 OR s.fuel_litres_level > 0 OR s.fuel_litres_can > 0)
+          GROUP BY d.id, d.device_name
+          ORDER BY COUNT(*) DESC
+          LIMIT $1`,
+        [args.sample]
+      );
+      devices = r.rows;
+    }
   } finally {
     await pool.end();
   }
@@ -127,7 +173,18 @@ async function main() {
     }
 
     if (summary.source !== "daily_summary") {
-      console.log(`  SKIP   ${label}: served ${summary.source}, not the rollup`);
+      // The API falls back to the live scan when the rollup does not cover every
+      // day of the window (the coverage gate in serveFromSummary). With --device
+      // that is the answer, not something to skip past quietly: it means the
+      // backfill did not reach far enough back for this window.
+      const why = `served ${summary.source || "live"}, not the rollup` +
+        ` — backfill does not cover all ${args.days} day(s)`;
+      if (args.device) {
+        console.log(`  GAP    ${label}: ${why}`);
+        mismatches++;
+      } else {
+        console.log(`  SKIP   ${label}: ${why}`);
+      }
       continue;
     }
     compared++;
@@ -184,6 +241,7 @@ function summaryNote(compared, mismatches) {
   if (compared === 0) return " — nothing was actually compared, check --days";
   return mismatches === 0 ? " — rollup matches the live query" : "";
 }
+
 
 main()
   .then((code) => process.exit(code))

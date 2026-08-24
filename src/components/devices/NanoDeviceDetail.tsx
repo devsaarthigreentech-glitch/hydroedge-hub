@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Device, Customer } from "@/types";
 import { Icons } from "@/components/ui/Icons";
 import { timeAgo } from "@/lib/utils";
@@ -25,7 +25,47 @@ interface NanoDeviceDetailProps {
 export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDeviceDetailProps) {
   const [tab, setTab] = useState<NanoTab>("live");
   const isMobile = useIsMobile();
-  const isOnline = device.connection_status === "online";
+
+  // ── "Last seen" for a Nano ────────────────────────────────────────────────
+  // Nano units are not GPS trackers, so devices.last_location_time is NULL and
+  // timeAgo() rendered "never" even while frames were streaming in. The real
+  // clock is nano_device_state, upserted on every frame — same source the LIVE
+  // tab reads. Poll it here so the header stays right on every tab.
+  // `tick` is bumped on each poll so timeAgo() re-renders even when the frame
+  // timestamp itself hasn't changed.
+  const [lastSeen, setLastSeen] = useState<string | undefined>(device.last_contact_at);
+  const [tick, setTick] = useState(0);
+
+  const fetchState = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/nano/live?device_id=${device.id}&compact=1`);
+      const d = await res.json();
+      if (d?.success) {
+        const st = d.data?.state;
+        setLastSeen(st?.last_ts_utc || st?.updated_at || device.last_contact_at);
+      }
+    } catch {
+      /* keep the last known value on a transient network error */
+    } finally {
+      setTick((t) => t + 1);
+    }
+  }, [device.id, device.last_contact_at]);
+
+  useEffect(() => {
+    setLastSeen(device.last_contact_at);
+    fetchState();
+    const i = setInterval(fetchState, 15000); // frames arrive ~30s
+    return () => clearInterval(i);
+  }, [fetchState, device.last_contact_at]);
+
+  // Fresh frame within ~3 reporting intervals beats the cached connection_status.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `tick` is the poll clock
+  const frameAgeMs = useMemo(
+    () => (lastSeen ? Date.now() - new Date(lastSeen).getTime() : null),
+    [lastSeen, tick]
+  );
+  const isOnline =
+    frameAgeMs !== null ? frameAgeMs < 90_000 : device.connection_status === "online";
 
   const tabs: Array<{ key: NanoTab; label: string; icon: React.ReactNode }> = [
     { key: "edit", label: "EDIT", icon: <Icons.Edit /> },
@@ -72,7 +112,9 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
             </span>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#00e676" }}>GreenVision</div>
           </div>
-          <div style={{ fontSize: 10, color: "#6b7280" }}>⏱ {timeAgo(device.last_location_time)}</div>
+          <div style={{ fontSize: 10, color: isOnline ? "#6b7280" : "#9ca3af" }} title={lastSeen ? new Date(lastSeen).toLocaleString() : "No frame received yet"}>
+            ⏱ {timeAgo(lastSeen)}
+          </div>
         </div>
       </div>
 
