@@ -7,13 +7,22 @@
 // polyline and offers 24h / today playback, which for a genset is a tangle of
 // GNSS jitter around one point dressed up as a journey.
 //
-// This shows the one thing that matters: where the unit is, how tightly its
-// fixes cluster, and whether that cluster has drifted past DG_MOVED_KM — the
-// same threshold the Analytics tab and the weekly report use.
+// There is no time-window picker either. "Where is this unit installed" has one
+// answer, not three, and the drift check behind it only has to be long enough
+// to be meaningful — DRIFT_WINDOW_DAYS is fixed at 30 and never surfaced as a
+// control, because nobody looking at this page wants to choose it.
 //
-// TODO: the plan is a 3D genset model rendered on the map rather than a plain
-// marker. This is the flat version; the position/drift logic below is what the
-// richer view would sit on top of.
+// The drift figure comes from `?only=movement`, which reads gps_records and
+// nothing else. The full analytics endpoint scans io_records, and having the
+// map wait on that is what made a slow analytics query blank the map too.
+//
+// Base layers: street and satellite. A genset usually sits in a yard or a field
+// where the street map is empty white space — the screenshot that prompted this
+// showed exactly that — so imagery is the more useful default for confirming
+// which building or plot the unit is actually on.
+//
+// TODO: a 3D genset model on the map instead of a plain marker. This is the flat
+// version; the position and drift logic below is what that would sit on.
 // ============================================================================
 
 import React, { useEffect, useRef, useState } from "react";
@@ -31,24 +40,34 @@ interface Movement {
   fixes: number;
   moved: boolean;
   threshold_km: number;
-  last_latitude: number | null;
-  last_longitude: number | null;
-  last_location_time: string | null;
 }
 
-const WINDOWS: { key: number; label: string }[] = [
-  { key: 7,  label: "7D" },
-  { key: 30, label: "30D" },
-  { key: 90, label: "90D" },
-];
+/** Long enough for drift to mean something, short enough to stay cheap. */
+const DRIFT_WINDOW_DAYS = 30;
+
+type BaseLayer = "satellite" | "street";
+
+const TILES: Record<BaseLayer, { url: string; attribution: string; maxZoom: number }> = {
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Imagery &copy; Esri",
+    maxZoom: 19,
+  },
+  street: {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19,
+  },
+};
 
 export function DgMapTab({ device }: DgMapTabProps) {
   const isMobile = useIsMobile();
   const mapRef = useRef<any>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const layersRef = useRef<any[]>([]);
+  const tileLayerRef = useRef<any>(null);
+  const overlayRef = useRef<any[]>([]);
 
-  const [days, setDays] = useState(30);
+  const [layer, setLayer] = useState<BaseLayer>("satellite");
   const [movement, setMovement] = useState<Movement | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -58,14 +77,17 @@ export function DgMapTab({ device }: DgMapTabProps) {
     device.last_latitude != null && device.last_longitude != null &&
     !isNaN(lat) && !isNaN(lon) && !(lat === 0 && lon === 0);
 
-  // ── Drift figures come from the DG analytics endpoint, so the map and the
-  //    Analytics tab can never disagree about whether the unit has moved. ────
+  // ── Drift check ───────────────────────────────────────────────────────────
+  // Deliberately not awaited by the map: the marker is drawn from the device
+  // row and appears immediately, whether or not this ever comes back.
   useEffect(() => {
     let cancelled = false;
-    async function load() {
+    (async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/analytics/dg?device_id=${device.id}&days=${days}`);
+        const res = await fetch(
+          `/api/analytics/dg?device_id=${device.id}&days=${DRIFT_WINDOW_DAYS}&only=movement`
+        );
         const data = await res.json();
         if (!cancelled) setMovement(data.success ? data.movement : null);
       } catch {
@@ -73,75 +95,89 @@ export function DgMapTab({ device }: DgMapTabProps) {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }
-    load();
+    })();
     return () => { cancelled = true; };
-  }, [device.id, days]);
+  }, [device.id]);
 
-  // ── Map ───────────────────────────────────────────────────────────────────
+  // ── Create the map once ───────────────────────────────────────────────────
+  // Split from the layer/overlay effects on purpose: rebuilding the whole map
+  // when the drift number arrives is what made it flash and re-centre.
   useEffect(() => {
-    if (!hasPosition || !mapContainerRef.current) return;
+    if (!hasPosition || !mapContainerRef.current || mapRef.current) return;
 
     let disposed = false;
     import("leaflet").then((L) => {
-      if (disposed || !mapContainerRef.current) return;
+      if (disposed || !mapContainerRef.current || mapRef.current) return;
 
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-        iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
-        shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-      });
-
-      if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
-
-      // Zoom 17 frames a single installation; the vehicle map's 15 is chosen to
-      // fit a route and leaves a genset as a dot in an empty field.
-      const map = L.map(mapContainerRef.current, { scrollWheelZoom: false }).setView([lat, lon], 17);
+      // Zoom 16 rather than 17: one notch out is the difference between a plot
+      // with recognisable surroundings and a featureless square.
+      const map = L.map(mapContainerRef.current, { scrollWheelZoom: false }).setView([lat, lon], 16);
       mapRef.current = map;
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
-        maxZoom: 19,
-      }).addTo(map);
-
-      layersRef.current.forEach((l) => { try { l.remove(); } catch {} });
-      layersRef.current = [];
-
-      const moved = movement?.moved === true;
-      const accent = moved ? "#dc2626" : "#16a34a";
-
-      // The spread circle is drawn only when there are enough fixes to mean
-      // something; a radius invented from three points would imply precision
-      // the data does not have.
-      if (movement?.spread_km != null && movement.spread_km > 0) {
-        const circle = L.circle([lat, lon], {
-          radius: (movement.spread_km * 1000) / 2,
-          color: accent, weight: 2, fillColor: accent, fillOpacity: 0.08,
-        }).addTo(map);
-        layersRef.current.push(circle);
-      }
-
-      const marker = L.circleMarker([lat, lon], {
-        radius: 9, color: "#ffffff", weight: 3,
-        fillColor: accent, fillOpacity: 1,
-      }).addTo(map);
-      marker.bindPopup(
-        `<b>${device.device_name || device.imei}</b><br/>` +
-        `${lat.toFixed(5)}, ${lon.toFixed(5)}<br/>` +
-        (device.last_location_time ? `Fix ${timeAgo(device.last_location_time)}` : "")
-      );
-      layersRef.current.push(marker);
-
       // Leaflet mis-measures its container when the tab mounts hidden.
-      setTimeout(() => { try { map.invalidateSize(); } catch {} }, 120);
+      setTimeout(() => { try { map.invalidateSize(); } catch {} }, 150);
     });
 
     return () => {
       disposed = true;
       if (mapRef.current) { try { mapRef.current.remove(); } catch {} mapRef.current = null; }
     };
-  }, [device.id, device.device_name, device.imei, device.last_location_time, lat, lon, hasPosition, movement]);
+  }, [hasPosition, lat, lon]);
+
+  // ── Swap the base layer ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current) return;
+    let disposed = false;
+    import("leaflet").then((L) => {
+      const map = mapRef.current;
+      if (disposed || !map) return;
+      if (tileLayerRef.current) { try { map.removeLayer(tileLayerRef.current); } catch {} }
+      const t = TILES[layer];
+      tileLayerRef.current = L.tileLayer(t.url, {
+        attribution: t.attribution, maxZoom: t.maxZoom,
+      }).addTo(map);
+      // Keep the marker above the tiles after a swap.
+      overlayRef.current.forEach((o) => { try { o.bringToFront?.(); } catch {} });
+    });
+    return () => { disposed = true; };
+  }, [layer, hasPosition, movement]);
+
+  // ── Marker and spread circle ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current) return;
+    let disposed = false;
+    import("leaflet").then((L) => {
+      const map = mapRef.current;
+      if (disposed || !map) return;
+
+      overlayRef.current.forEach((o) => { try { map.removeLayer(o); } catch {} });
+      overlayRef.current = [];
+
+      const moved = movement?.moved === true;
+      const accent = moved ? "#dc2626" : "#16a34a";
+
+      // Drawn only when there are enough fixes to mean something; a radius
+      // invented from three points would imply precision the data lacks.
+      if (movement?.spread_km != null && movement.spread_km > 0) {
+        const circle = L.circle([lat, lon], {
+          radius: (movement.spread_km * 1000) / 2,
+          color: accent, weight: 2, fillColor: accent, fillOpacity: 0.1,
+        }).addTo(map);
+        overlayRef.current.push(circle);
+      }
+
+      const marker = L.circleMarker([lat, lon], {
+        radius: 9, color: "#ffffff", weight: 3, fillColor: accent, fillOpacity: 1,
+      }).addTo(map);
+      marker.bindPopup(
+        `<b>${device.device_name || device.imei}</b><br/>` +
+        `${lat.toFixed(5)}, ${lon.toFixed(5)}` +
+        (device.last_location_time ? `<br/>Fix ${timeAgo(device.last_location_time)}` : "")
+      );
+      overlayRef.current.push(marker);
+    });
+    return () => { disposed = true; };
+  }, [movement, lat, lon, device.device_name, device.imei, device.last_location_time, hasPosition]);
 
   const cardStyle: React.CSSProperties = {
     background: "white", borderRadius: 14, border: `2px solid ${THEME.border.light}`,
@@ -164,16 +200,17 @@ export function DgMapTab({ device }: DgMapTabProps) {
           </div>
         </div>
 
+        {/* Base layer only — there is no time range to choose here. */}
         <div style={{ display: "flex", gap: 2, background: THEME.neutral[100], padding: 3, borderRadius: 8, alignSelf: "flex-start" }}>
-          {WINDOWS.map((w) => (
-            <button key={w.key} onClick={() => setDays(w.key)} style={{
+          {([["satellite", "Satellite"], ["street", "Map"]] as [BaseLayer, string][]).map(([k, label]) => (
+            <button key={k} onClick={() => setLayer(k)} style={{
               padding: isMobile ? "5px 12px" : "7px 18px", borderRadius: 6,
               fontSize: isMobile ? 11 : 12, fontWeight: 700, cursor: "pointer",
               fontFamily: "inherit", border: "none", transition: "all 0.15s",
-              background: days === w.key ? THEME.primary[500] : "transparent",
-              color: days === w.key ? "white" : THEME.text.secondary,
-              boxShadow: days === w.key ? THEME.shadow.sm : "none",
-            }}>{w.label}</button>
+              background: layer === k ? THEME.primary[500] : "transparent",
+              color: layer === k ? "white" : THEME.text.secondary,
+              boxShadow: layer === k ? THEME.shadow.sm : "none",
+            }}>{label}</button>
           ))}
         </div>
       </div>
@@ -186,7 +223,7 @@ export function DgMapTab({ device }: DgMapTabProps) {
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#7f1d1d" }}>This generator has moved</div>
             <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 2, lineHeight: 1.5 }}>
-              Its fixes span about {movement.spread_km?.toFixed(1)} km over the last {days} days,
+              Its fixes span about {movement.spread_km?.toFixed(1)} km over the last {DRIFT_WINDOW_DAYS} days,
               past the {movement.threshold_km} km limit. Confirm it was relocated and update the site record.
             </div>
           </div>
@@ -201,28 +238,31 @@ export function DgMapTab({ device }: DgMapTabProps) {
         <>
           {/* ── Map ── */}
           <div style={{ ...cardStyle, padding: 0, overflow: "hidden", marginBottom: 16 }}>
-            <div ref={mapContainerRef} style={{ height: isMobile ? 300 : 420, width: "100%" }} />
+            <div ref={mapContainerRef} style={{ height: isMobile ? 300 : 440, width: "100%", background: THEME.neutral[100] }} />
           </div>
 
           {/* ── Facts ── */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 14 }}>
             <Fact label="Status"
-              value={loading ? "…" : movement?.moved ? "Moved" : "Stationary"}
-              sub={movement?.spread_km != null ? `${movement.spread_km.toFixed(2)} km spread` : "spread unknown"}
-              color={movement?.moved ? "#b91c1c" : "#15803d"} isMobile={isMobile} />
+              value={loading ? "…" : movement === null ? "Unknown" : movement.moved ? "Moved" : "Stationary"}
+              sub={movement?.spread_km != null
+                ? `${movement.spread_km.toFixed(2)} km spread`
+                : loading ? "checking" : "not enough fixes"}
+              color={movement?.moved ? "#b91c1c" : movement === null ? THEME.text.tertiary : "#15803d"}
+              isMobile={isMobile} />
             <Fact label="Latitude" value={lat.toFixed(5)} sub="last fix" color={THEME.text.primary} isMobile={isMobile} />
             <Fact label="Longitude" value={lon.toFixed(5)} sub="last fix" color={THEME.text.primary} isMobile={isMobile} />
             <Fact label="Last fix"
               value={device.last_location_time ? timeAgo(device.last_location_time) : "—"}
-              sub={loading ? "…" : `${movement?.fixes ?? 0} fixes in ${days}D`}
+              sub={loading ? "…" : `${movement?.fixes ?? 0} fixes in ${DRIFT_WINDOW_DAYS}D`}
               color={THEME.text.primary} isMobile={isMobile} />
           </div>
 
           <div style={{ marginTop: 16, fontSize: 11, color: THEME.text.tertiary, lineHeight: 1.6 }}>
-            The shaded circle is how far this unit&rsquo;s fixes spread over the window, not an accuracy
-            figure — consumer GNSS wanders by tens of metres while standing still, which is why the
-            movement limit is set at {movement?.threshold_km ?? 20} km rather than at any drift at all.
-            Route playback is not shown: a generator has no route.
+            Position is checked over the last {DRIFT_WINDOW_DAYS} days. The shaded circle is how far this
+            unit&rsquo;s fixes spread in that time, not an accuracy figure — consumer GNSS wanders by tens of
+            metres while standing still, which is why the movement limit is {movement?.threshold_km ?? 20} km
+            rather than any drift at all. Route playback is not shown: a generator has no route.
           </div>
         </>
       )}

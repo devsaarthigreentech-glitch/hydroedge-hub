@@ -9,7 +9,8 @@ import {
 // Analytics tab and this report can never quote different figures for the
 // same week — including the threshold at which a DG counts as relocated.
 import {
-  computeDgMetrics, computeDgMovement, currentDivisorFor,
+  fetchDgEngine, fetchDgOutput, fetchDgHealth, fetchDgMovement,
+  buildDgDaily, currentDivisorFor,
 } from "@/lib/dg-metrics";
 
 // ============================================================================
@@ -206,12 +207,18 @@ async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables
   // in the strip as a zero rather than dropping out of the chart.
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(week.start, i));
 
-  const [metrics, movement] = await Promise.all([
-    computeDgMetrics(client, row.id, row.device_type, week.startAt, week.endAt, weekDays),
-    computeDgMovement(client, row.id, week.startAt, week.endAt),
+  // Four independent statements rather than one — see the note in dg-metrics.
+  // This route runs on its own pool with a 120s budget, so unlike the Analytics
+  // tab it can afford to let a failure propagate: the per-device catch in
+  // computeReports drops that one unit from the report and says so.
+  const [engine, output, health, movement] = await Promise.all([
+    fetchDgEngine(client, row.id, week.startAt, week.endAt),
+    fetchDgOutput(client, row.id, row.device_type, week.startAt, week.endAt),
+    fetchDgHealth(client, row.id, week.startAt, week.endAt),
+    fetchDgMovement(client, row.id, week.startAt, week.endAt),
   ]);
 
-  const daily: WeeklyDay[] = metrics.daily.map((d) => ({
+  const daily: WeeklyDay[] = buildDgDaily(weekDays, engine, output).map((d) => ({
     day: d.day,
     label: dayLabel(d.day),
     engineOnHours: d.engineOnHours,
@@ -246,11 +253,11 @@ async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables
     }
   }
 
-  const hoursWithData = metrics.hoursWithData;
-  const engineOnHours = metrics.engineOnHours;
-  const loadHours     = metrics.loadHours;
+  const hoursWithData = health.hoursWithData;
+  const engineOnHours = engine.engineOnHours;
+  const loadHours     = output.loadHours;
   const setAmps       = round(num(row.set_ain1_raw) !== null ? (num(row.set_ain1_raw) as number) / divisor : null, 1);
-  const avgAmps       = metrics.avgAmps;
+  const avgAmps       = output.avgAmps;
   const isDrive       = row.asset_name === "EOW";
 
   // ── Status ─────────────────────────────────────────────────────────────────
@@ -281,15 +288,15 @@ async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables
     dataAvailabilityPct: Math.round((hoursWithData / 168) * 100),
     engineOnHours,
     loadHours,
-    starts: metrics.starts,
-    longestRunHours: metrics.longestRunHours,
+    starts: engine.starts,
+    longestRunHours: engine.longestRunHours,
     avgAmps,
-    peakAmps: metrics.peakAmps,
+    peakAmps: output.peakAmps,
     setAmps,
-    supplyMinV: metrics.supplyMinV,
-    supplyAvgV: metrics.supplyAvgV,
-    batteryMinV: metrics.batteryMinV,
-    gsmAvgPct: metrics.gsmAvgPct,
+    supplyMinV: health.supplyMinV,
+    supplyAvgV: health.supplyAvgV,
+    batteryMinV: health.batteryMinV,
+    gsmAvgPct: health.gsmAvgPct,
     waterEpisodes,
     waterShortHours,
     displacementKm,

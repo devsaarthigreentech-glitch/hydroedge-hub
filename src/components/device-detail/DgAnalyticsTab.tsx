@@ -42,18 +42,21 @@ interface DgDay {
   avgAmps: number | null;
 }
 
+// Every field is nullable: the four signal groups behind them are queried and
+// settled independently, so a slow one leaves its own tiles blank instead of
+// taking the page down. See the route's `degraded` note.
 interface DgSummary {
-  engine_on_hours: number;
-  load_hours: number;
-  starts: number;
-  longest_run_hours: number;
+  engine_on_hours: number | null;
+  load_hours: number | null;
+  starts: number | null;
+  longest_run_hours: number | null;
   avg_amps: number | null;
   peak_amps: number | null;
   set_amps: number | null;
-  utilisation_pct: number;
+  utilisation_pct: number | null;
   load_ratio: number | null;
-  hours_with_data: number;
-  data_availability_pct: number;
+  hours_with_data: number | null;
+  data_availability_pct: number | null;
   supply_min_v: number | null;
   supply_avg_v: number | null;
   battery_min_v: number | null;
@@ -166,6 +169,9 @@ export function DgAnalyticsTab({ device, days, startIso, endIso, windowLabel }: 
   const [windowHours, setWindowHours] = useState(24);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Signal groups the server could not compute in time. */
+  const [degraded, setDegraded] = useState<string[]>([]);
+  const [engineSource, setEngineSource] = useState<string | null>(null);
 
   const statGrid = isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)";
 
@@ -183,14 +189,16 @@ export function DgAnalyticsTab({ device, days, startIso, endIso, windowLabel }: 
         setMovement(data.movement);
         setDaily(data.daily ?? []);
         setWindowHours(data.window?.hours ?? 24);
+        setDegraded(data.degraded ?? []);
+        setEngineSource(data.meta?.engine_source ?? null);
       } else {
         // Clear rather than keep the previous window's numbers under the new
         // label — stale totals that look valid are worse than an empty state.
-        setSummary(null); setMovement(null); setDaily([]);
+        setSummary(null); setMovement(null); setDaily([]); setDegraded([]);
         setError(data.error || "Failed to load generator analytics");
       }
     } catch {
-      setSummary(null); setMovement(null); setDaily([]);
+      setSummary(null); setMovement(null); setDaily([]); setDegraded([]);
       setError("Failed to load generator analytics");
     } finally {
       setLoading(false);
@@ -203,13 +211,22 @@ export function DgAnalyticsTab({ device, days, startIso, endIso, windowLabel }: 
   const activeDays = daily.filter((d) => d.engineOnHours > 0).length;
 
   // Running but producing little is the fault this tab exists to surface.
+  // Requires both halves of the pair; one alone would give a false ratio.
   const underProducing =
-    summary !== null && summary.engine_on_hours > 0 &&
+    summary !== null && (summary.engine_on_hours ?? 0) > 0 &&
     summary.load_ratio !== null && summary.load_ratio < 0.5;
 
   const offSetpoint =
     summary !== null && summary.set_amps !== null && summary.avg_amps !== null &&
     Math.abs(summary.avg_amps - summary.set_amps) > summary.set_amps * 0.1;
+
+  // "No data" is only true if the health group actually answered; a timed-out
+  // coverage count must not be reported to the customer as a dead device.
+  const noData =
+    !loading && summary !== null && summary.hours_with_data === 0;
+  const patchy =
+    summary !== null && summary.hours_with_data !== null && summary.hours_with_data > 0 &&
+    summary.data_availability_pct !== null && summary.data_availability_pct < 50;
 
   // No page padding or background here — AnalyticsTab owns the scroll container
   // and the range picker above; this component only supplies the sections.
@@ -234,13 +251,20 @@ export function DgAnalyticsTab({ device, days, startIso, endIso, windowLabel }: 
         <Banner tone="amber" icon="⚡" title="Output outside the commissioned band"
           body={`Average output ${summary!.avg_amps!.toFixed(1)} A against a ${summary!.set_amps!.toFixed(1)} A setpoint — outside ±10%.`} />
       )}
-      {summary !== null && summary.hours_with_data === 0 && !loading && (
+      {noData && (
         <Banner tone="gray" icon="⚪" title="No data in this window"
           body="The device sent nothing over the selected period. Check connectivity and the SIM before reading anything into the figures below." />
       )}
-      {summary !== null && summary.hours_with_data > 0 && summary.data_availability_pct < 50 && (
+      {patchy && (
         <Banner tone="amber" icon="📡" title="Patchy coverage"
-          body={`Packets arrived in only ${summary.data_availability_pct}% of the hours in this window (${summary.hours_with_data} of ${windowHours}). Run time is measured from what arrived, so treat these totals as a floor.`} />
+          body={`Packets arrived in only ${summary!.data_availability_pct}% of the hours in this window (${summary!.hours_with_data} of ${windowHours}). Run time is measured from what arrived, so treat these totals as a floor.`} />
+      )}
+
+      {/* Some figures could not be computed in time. Naming which ones beats a
+          single red error that hides the numbers that did come back. */}
+      {degraded.length > 0 && !loading && (
+        <Banner tone="blue" icon="⏳" title="Some figures took too long to compute"
+          body={`${degraded.map((d) => d.split(":")[0]).join(", ")} could not be read within the time limit, so those tiles are blank — the rest of the page is accurate. This usually means the database is busy or the io_records index from migration 002 has not been built. Try a shorter window, or reload.`} />
       )}
 
       {/* ── SECTION 1: ENGINE RUN TIME ── */}
@@ -258,14 +282,16 @@ export function DgAnalyticsTab({ device, days, startIso, endIso, windowLabel }: 
 
       <div style={{ display: "grid", gridTemplateColumns: statGrid, gap: isMobile ? 10 : 14, marginBottom: 24 }}>
         <StatCard icon="⏱️" label="Engine-on time" value={loading ? "…" : fmtHours(summary?.engine_on_hours)}
-          sub={summary ? `${summary.utilisation_pct}% of the window` : "—"}
+          sub={summary?.utilisation_pct != null
+            ? `${summary.utilisation_pct}% of the window${engineSource === "daily_summary" ? " · from rollup" : ""}`
+            : "—"}
           color="#15803d" bg="#f0fdf4" isMobile={isMobile} />
         <StatCard icon="⚡" label="Under load" value={loading ? "…" : fmtHours(summary?.load_hours)}
-          sub={summary?.load_ratio !== null && summary?.load_ratio !== undefined
+          sub={summary?.load_ratio != null
             ? `${Math.round(summary.load_ratio * 100)}% of run time` : "output > 2 A"}
           color="#1d4ed8" bg="#eff6ff" isMobile={isMobile} />
-        <StatCard icon="🔁" label="Starts" value={loading ? "…" : String(summary?.starts ?? "—")}
-          sub={summary && summary.starts > 0 ? `longest run ${fmtHours(summary.longest_run_hours)}` : "no starts"}
+        <StatCard icon="🔁" label="Starts" value={loading ? "…" : summary?.starts != null ? String(summary.starts) : "—"}
+          sub={summary?.starts ? `longest run ${fmtHours(summary.longest_run_hours)}` : "no starts"}
           color="#b45309" bg="#fffbeb" isMobile={isMobile} />
         <StatCard icon="📊" label="Avg output" value={loading ? "…" : fmtVal(summary?.avg_amps, "A")}
           sub={summary?.peak_amps != null ? `peak ${summary.peak_amps.toFixed(1)} A` : "while producing"}
@@ -335,8 +361,9 @@ export function DgAnalyticsTab({ device, days, startIso, endIso, windowLabel }: 
           sub="minimum" color="#7c3aed" bg="#f5f3ff" isMobile={isMobile} />
         <StatCard icon="📶" label="GSM signal" value={loading ? "…" : fmtVal(summary?.gsm_avg_pct, "%", 0)}
           sub="average" color="#1d4ed8" bg="#eff6ff" isMobile={isMobile} />
-        <StatCard icon="📈" label="Data availability" value={loading ? "…" : `${summary?.data_availability_pct ?? 0}%`}
-          sub={summary ? `${summary.hours_with_data} of ${windowHours} h` : "—"}
+        <StatCard icon="📈" label="Data availability"
+          value={loading ? "…" : summary?.data_availability_pct != null ? `${summary.data_availability_pct}%` : "—"}
+          sub={summary?.hours_with_data != null ? `${summary.hours_with_data} of ${windowHours} h` : "—"}
           color="#b45309" bg="#fffbeb" isMobile={isMobile} />
       </div>
 

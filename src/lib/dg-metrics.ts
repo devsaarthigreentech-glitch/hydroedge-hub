@@ -16,6 +16,20 @@
 // CAN_ADAPTER_IO_MAP note in src/app/api/telemetry/[deviceId]/route.ts for what
 // happens when IO 18 is read as fuel on a device that has no adapter.
 //
+// ── Why this is four small queries, not one big one ─────────────────────────
+// It started as a single statement with eight CTEs. On a 46 GB / 314 M-row
+// io_records table sharing a 1 vCPU host with the GPS ingest, that is one long
+// statement — and one timeout took the whole tab down with "Error: timeout
+// exceeded", including the engine run time, which is the only number anyone
+// actually opened the tab for.
+//
+// Now each group of signals is its own statement and the caller settles them
+// independently: a slow current query costs you the output tiles, not the page.
+// Each is a single-IO range scan, which is exactly the shape
+// idx_io_records_device_io_ts (device_id, io_id, timestamp) serves — see
+// db/migrations/002. If that index has not been built, these are still slow;
+// building it is the single biggest win available here.
+//
 // Used by /api/analytics/dg (the Analytics tab) and by the weekly customer
 // report, so both quote the same numbers from the same rules.
 // ============================================================================
@@ -61,20 +75,29 @@ export interface DgDay {
   avgAmps: number | null;
 }
 
-export interface DgMetrics {
+/** Din.1 group — run time, starts, run lengths. */
+export interface DgEngine {
   engineOnHours: number;
-  loadHours: number;
   starts: number;
   longestRunHours: number;
+  daily: Map<string, { hours: number; starts: number }>;
+}
+
+/** Ain.1 group — time under load and output current. */
+export interface DgOutput {
+  loadHours: number;
   avgAmps: number | null;
   peakAmps: number | null;
-  /** Distinct clock hours with at least one packet. */
+  daily: Map<string, { loadHours: number; avgAmps: number | null }>;
+}
+
+/** Supply, battery, signal and packet coverage. */
+export interface DgHealth {
   hoursWithData: number;
   supplyMinV: number | null;
   supplyAvgV: number | null;
   batteryMinV: number | null;
   gsmAvgPct: number | null;
-  daily: DgDay[];
 }
 
 export interface DgMovement {
@@ -86,14 +109,12 @@ export interface DgMovement {
 
 // ─── SQL ─────────────────────────────────────────────────────────────────────
 //
-// $1 device, $2 window start, $3 window end, $4 current divisor,
-// $5 gap cap seconds, $6 load threshold amps, $7 min run seconds.
-//
-// Engine hours use the same rule as the daily rollup in migration 001 — sum the
-// gaps between consecutive ON samples, discard gaps over the cap — so this and
-// the Analytics rollup cannot disagree about the same period.
+// Every statement below takes $1 device, $2 window start, $3 window end, and
+// touches exactly ONE io_id (except the coverage count) so the composite index
+// can serve it as a plain range scan.
 
-export const DG_METRICS_SQL = `
+/** $4 gap cap seconds, $5 min run seconds. */
+const ENGINE_SQL = `
 WITH din AS (
   SELECT timestamp,
          io_value::int AS v,
@@ -111,7 +132,7 @@ on_gaps AS (
 engine_daily AS (
   SELECT day, SUM(secs) / 3600.0 AS hours
     FROM on_gaps
-   WHERE secs > 0 AND secs <= $5
+   WHERE secs > 0 AND secs <= $4
    GROUP BY day
 ),
 edges AS (
@@ -119,7 +140,10 @@ edges AS (
     FROM din
 ),
 starts AS (
-  SELECT timestamp, day FROM edges WHERE v = 1 AND prev = 0
+  SELECT day FROM edges WHERE v = 1 AND prev = 0
+),
+starts_daily AS (
+  SELECT day, COUNT(*) AS n FROM starts GROUP BY day
 ),
 -- Only transitions matter for run lengths; consecutive duplicates are noise.
 trans AS (
@@ -132,25 +156,41 @@ runs AS (
            - timestamp
          )) AS secs
     FROM trans
-),
--- Current is only meaningful while the engine is running, so the Ain.1 samples
--- are joined to a same-instant Din.1 = 1 record rather than taken on their own.
-amp_samples AS (
-  SELECT a.timestamp,
-         (a.timestamp AT TIME ZONE 'Asia/Kolkata')::date AS day,
-         a.io_value::numeric / $4 AS amps
-    FROM io_records a
-    JOIN io_records d
-      ON  d.device_id = a.device_id
-      AND d.timestamp = a.timestamp
-      AND d.io_id     = 1
-      AND d.io_value::numeric = 1
-      AND d.timestamp >= $2 AND d.timestamp < $3
-   WHERE a.device_id = $1 AND a.io_id = 9
-     AND a.timestamp >= $2 AND a.timestamp < $3
+)
+SELECT
+  (SELECT COALESCE(SUM(hours), 0) FROM engine_daily)                   AS engine_on_hours,
+  (SELECT COUNT(*) FROM starts)                                        AS starts,
+  (SELECT COALESCE(MAX(secs), 0) FROM runs WHERE v = 1 AND secs >= $5) AS longest_run_secs,
+  (SELECT COALESCE(json_agg(json_build_object('day', day, 'hours', hours) ORDER BY day), '[]'::json)
+     FROM engine_daily)                                                AS engine_daily,
+  (SELECT COALESCE(json_agg(json_build_object('day', day, 'n', n) ORDER BY day), '[]'::json)
+     FROM starts_daily)                                                AS starts_daily
+`;
+
+/**
+ * $4 current divisor, $5 gap cap seconds, $6 load threshold amps.
+ *
+ * This used to join Ain.1 to a same-instant Din.1 = 1 row to prove the engine
+ * was running. That self-join was the most expensive thing on the page and it
+ * proved nothing new: a genset cannot put out more than 2 A with the engine
+ * stopped, so `amps > threshold` already implies running. Dropping it turns a
+ * join of two 100k-row ranges into one range scan.
+ *
+ * (An abnormal "current while OFF" reading is a fault the health panel and the
+ * alert scan already raise; it is not this tab's job to catch it, and folding
+ * it in here is what made the tab time out.)
+ */
+const OUTPUT_SQL = `
+WITH amp_samples AS (
+  SELECT timestamp,
+         (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS day,
+         io_value::numeric / $4 AS amps
+    FROM io_records
+   WHERE device_id = $1 AND io_id = 9
+     AND timestamp >= $2 AND timestamp < $3
 ),
 load_gaps AS (
-  SELECT (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS day,
+  SELECT day,
          EXTRACT(EPOCH FROM (LEAD(timestamp) OVER (ORDER BY timestamp) - timestamp)) AS secs
     FROM amp_samples
    WHERE amps > $6
@@ -165,59 +205,48 @@ amps_daily AS (
   SELECT day, AVG(amps) FILTER (WHERE amps > $6) AS avg_amps
     FROM amp_samples
    GROUP BY day
-),
-coverage AS (
-  SELECT COUNT(DISTINCT date_trunc('hour', timestamp)) AS hours
-    FROM io_records
-   WHERE device_id = $1 AND timestamp >= $2 AND timestamp < $3
-),
-supply AS (
-  SELECT MIN(io_value::numeric) / 1000.0 AS min_v,
-         AVG(io_value::numeric) / 1000.0 AS avg_v
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 66
-     AND timestamp >= $2 AND timestamp < $3
-     AND io_value::numeric > 0
-),
-battery AS (
-  SELECT MIN(io_value::numeric) / 1000.0 AS min_v
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 67
-     AND timestamp >= $2 AND timestamp < $3
-     AND io_value::numeric > 0
-),
-gsm AS (
-  SELECT AVG(io_value::numeric) AS avg_pct
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 21
-     AND timestamp >= $2 AND timestamp < $3
 )
 SELECT
-  (SELECT COALESCE(SUM(hours), 0) FROM engine_daily)                    AS engine_on_hours,
-  (SELECT COALESCE(SUM(hours), 0) FROM load_daily)                      AS load_hours,
-  (SELECT COUNT(*) FROM starts)                                         AS starts,
-  (SELECT COALESCE(MAX(secs), 0) FROM runs WHERE v = 1 AND secs >= $7)  AS longest_run_secs,
-  (SELECT AVG(amps) FROM amp_samples WHERE amps > $6)                    AS avg_amps,
-  (SELECT MAX(amps) FROM amp_samples)                                    AS peak_amps,
-  (SELECT hours FROM coverage)                                          AS hours_with_data,
-  (SELECT min_v FROM supply)                                            AS supply_min_v,
-  (SELECT avg_v FROM supply)                                            AS supply_avg_v,
-  (SELECT min_v FROM battery)                                           AS battery_min_v,
-  (SELECT avg_pct FROM gsm)                                             AS gsm_avg_pct,
+  (SELECT COALESCE(SUM(hours), 0) FROM load_daily)              AS load_hours,
+  (SELECT AVG(amps) FROM amp_samples WHERE amps > $6)           AS avg_amps,
+  (SELECT MAX(amps) FROM amp_samples)                           AS peak_amps,
   (SELECT COALESCE(json_agg(json_build_object('day', day, 'hours', hours) ORDER BY day), '[]'::json)
-     FROM engine_daily)                                                 AS engine_daily,
-  (SELECT COALESCE(json_agg(json_build_object('day', day, 'hours', hours) ORDER BY day), '[]'::json)
-     FROM load_daily)                                                   AS load_daily,
-  (SELECT COALESCE(json_agg(json_build_object('day', day, 'n', n) ORDER BY day), '[]'::json)
-     FROM (SELECT day, COUNT(*) AS n FROM starts GROUP BY day) s)       AS starts_daily,
+     FROM load_daily)                                           AS load_daily,
   (SELECT COALESCE(json_agg(json_build_object('day', day, 'avg', avg_amps) ORDER BY day), '[]'::json)
-     FROM amps_daily)                                                   AS amps_daily
+     FROM amps_daily)                                           AS amps_daily
+`;
+
+/**
+ * Supply, battery, signal, and how much of the window actually has packets.
+ *
+ * The coverage count is the one statement here that is not restricted to a
+ * single io_id, so it is the one that leans on (device_id, timestamp). It is
+ * also the least important number on the page — if this group times out the
+ * tab simply omits the power tiles.
+ */
+const HEALTH_SQL = `
+SELECT
+  (SELECT COUNT(DISTINCT date_trunc('hour', timestamp))
+     FROM io_records
+    WHERE device_id = $1 AND timestamp >= $2 AND timestamp < $3)      AS hours_with_data,
+  (SELECT MIN(io_value::numeric) / 1000.0 FROM io_records
+    WHERE device_id = $1 AND io_id = 66
+      AND timestamp >= $2 AND timestamp < $3 AND io_value::numeric > 0) AS supply_min_v,
+  (SELECT AVG(io_value::numeric) / 1000.0 FROM io_records
+    WHERE device_id = $1 AND io_id = 66
+      AND timestamp >= $2 AND timestamp < $3 AND io_value::numeric > 0) AS supply_avg_v,
+  (SELECT MIN(io_value::numeric) / 1000.0 FROM io_records
+    WHERE device_id = $1 AND io_id = 67
+      AND timestamp >= $2 AND timestamp < $3 AND io_value::numeric > 0) AS battery_min_v,
+  (SELECT AVG(io_value::numeric) FROM io_records
+    WHERE device_id = $1 AND io_id = 21
+      AND timestamp >= $2 AND timestamp < $3)                          AS gsm_avg_pct
 `;
 
 // A stationary DG's fixes should all sit within GNSS jitter of one spot. The
 // 2nd/98th percentiles discard the occasional wild fix a cheap receiver emits,
 // so one bad packet cannot report a genset as relocated.
-export const DG_GPS_SPREAD_SQL = `
+const GPS_SPREAD_SQL = `
 SELECT COUNT(*) AS n,
        percentile_cont(0.02) WITHIN GROUP (ORDER BY latitude)  AS lat_lo,
        percentile_cont(0.98) WITHIN GROUP (ORDER BY latitude)  AS lat_hi,
@@ -252,83 +281,114 @@ const num = (v: unknown): number | null => {
 const round = (v: number | null, d = 1): number | null =>
   v === null ? null : parseFloat(v.toFixed(d));
 
+function indexByDay<T>(arr: Array<Record<string, unknown>> | null, key: string): Map<string, T> {
+  return new Map((arr || []).map((x) => [String(x.day).slice(0, 10), x[key] as T]));
+}
+
 /** Anything with a `.query(text, params)` method — a pg Pool or a Client. */
-interface Queryable {
+export interface Queryable {
   query(text: string, params?: unknown[]): Promise<{ rows: any[] }>;
 }
 
-/**
- * All the engine/electrical numbers for one device over one window.
- *
- * `days` is the list of IST calendar days to emit in the daily breakdown; pass
- * the window's days so a day with no activity appears as a zero rather than
- * silently vanishing from the chart.
- */
-export async function computeDgMetrics(
-  client: Queryable,
-  deviceId: string,
-  deviceType: string,
-  startAt: Date,
-  endAt: Date,
-  days: string[]
-): Promise<DgMetrics> {
-  const r = (await client.query(DG_METRICS_SQL, [
-    deviceId, startAt, endAt, currentDivisorFor(deviceType),
-    GAP_CAP_SECONDS, LOAD_THRESHOLD_A, MIN_RUN_SECONDS,
+// ─── The four independent groups ─────────────────────────────────────────────
+
+export async function fetchDgEngine(
+  client: Queryable, deviceId: string, startAt: Date, endAt: Date
+): Promise<DgEngine> {
+  const r = (await client.query(ENGINE_SQL, [
+    deviceId, startAt, endAt, GAP_CAP_SECONDS, MIN_RUN_SECONDS,
   ])).rows[0];
 
-  const index = <T,>(arr: Array<Record<string, unknown>>, key: string): Map<string, T> =>
-    new Map((arr || []).map((x) => [String(x.day).slice(0, 10), x[key] as T]));
-
-  const engineByDay = index<number>(r.engine_daily, "hours");
-  const loadByDay   = index<number>(r.load_daily, "hours");
-  const startsByDay = index<number>(r.starts_daily, "n");
-  const ampsByDay   = index<number | null>(r.amps_daily, "avg");
-
-  const daily: DgDay[] = days.map((day) => ({
-    day,
-    engineOnHours: round(num(engineByDay.get(day)) ?? 0, 2) ?? 0,
-    loadHours:     round(num(loadByDay.get(day)) ?? 0, 2) ?? 0,
-    starts:        num(startsByDay.get(day)) ?? 0,
-    avgAmps:       round(num(ampsByDay.get(day)), 1),
-  }));
+  const hoursByDay  = indexByDay<number>(r.engine_daily, "hours");
+  const startsByDay = indexByDay<number>(r.starts_daily, "n");
+  const daily = new Map<string, { hours: number; starts: number }>();
+  for (const day of new Set([...hoursByDay.keys(), ...startsByDay.keys()])) {
+    daily.set(day, {
+      hours:  round(num(hoursByDay.get(day)) ?? 0, 2) ?? 0,
+      starts: num(startsByDay.get(day)) ?? 0,
+    });
+  }
 
   return {
     engineOnHours:   round(num(r.engine_on_hours) ?? 0, 2) ?? 0,
-    loadHours:       round(num(r.load_hours) ?? 0, 2) ?? 0,
     starts:          Number(r.starts || 0),
     longestRunHours: round(Number(r.longest_run_secs || 0) / 3600, 2) ?? 0,
-    avgAmps:         round(num(r.avg_amps), 1),
-    peakAmps:        round(num(r.peak_amps), 1),
-    hoursWithData:   Number(r.hours_with_data || 0),
-    supplyMinV:      round(num(r.supply_min_v), 1),
-    supplyAvgV:      round(num(r.supply_avg_v), 1),
-    batteryMinV:     round(num(r.battery_min_v), 2),
-    gsmAvgPct:       round(num(r.gsm_avg_pct), 0),
     daily,
   };
 }
 
-/** How far the unit's fixes spread over the window, and whether that is movement. */
-export async function computeDgMovement(
-  client: Queryable,
-  deviceId: string,
-  startAt: Date,
-  endAt: Date
-): Promise<DgMovement> {
-  try {
-    const g = (await client.query(DG_GPS_SPREAD_SQL, [deviceId, startAt, endAt])).rows[0];
-    const fixes = Number(g?.n || 0);
-    if (fixes < MIN_FIXES_FOR_MOVE || g?.lat_lo === null || g?.lat_lo === undefined) {
-      return { spreadKm: null, fixes, moved: false };
-    }
-    const spreadKm = round(haversineKm(+g.lat_lo, +g.lon_lo, +g.lat_hi, +g.lon_hi), 2);
-    return { spreadKm, fixes, moved: spreadKm !== null && spreadKm > DG_MOVED_KM };
-  } catch (err: any) {
-    // A missing index or a bad row must not cost the caller its engine numbers.
-    console.warn(`[dg-metrics] gps spread failed for ${deviceId}: ${err.message}`);
-    return { spreadKm: null, fixes: 0, moved: false };
+export async function fetchDgOutput(
+  client: Queryable, deviceId: string, deviceType: string, startAt: Date, endAt: Date
+): Promise<DgOutput> {
+  const r = (await client.query(OUTPUT_SQL, [
+    deviceId, startAt, endAt, currentDivisorFor(deviceType), GAP_CAP_SECONDS, LOAD_THRESHOLD_A,
+  ])).rows[0];
+
+  const loadByDay = indexByDay<number>(r.load_daily, "hours");
+  const ampsByDay = indexByDay<number | null>(r.amps_daily, "avg");
+  const daily = new Map<string, { loadHours: number; avgAmps: number | null }>();
+  for (const day of new Set([...loadByDay.keys(), ...ampsByDay.keys()])) {
+    daily.set(day, {
+      loadHours: round(num(loadByDay.get(day)) ?? 0, 2) ?? 0,
+      avgAmps:   round(num(ampsByDay.get(day)), 1),
+    });
   }
+
+  return {
+    loadHours: round(num(r.load_hours) ?? 0, 2) ?? 0,
+    avgAmps:   round(num(r.avg_amps), 1),
+    peakAmps:  round(num(r.peak_amps), 1),
+    daily,
+  };
+}
+
+export async function fetchDgHealth(
+  client: Queryable, deviceId: string, startAt: Date, endAt: Date
+): Promise<DgHealth> {
+  const r = (await client.query(HEALTH_SQL, [deviceId, startAt, endAt])).rows[0];
+  return {
+    hoursWithData: Number(r.hours_with_data || 0),
+    supplyMinV:    round(num(r.supply_min_v), 1),
+    supplyAvgV:    round(num(r.supply_avg_v), 1),
+    batteryMinV:   round(num(r.battery_min_v), 2),
+    gsmAvgPct:     round(num(r.gsm_avg_pct), 0),
+  };
+}
+
+/** How far the unit's fixes spread over the window, and whether that is movement. */
+export async function fetchDgMovement(
+  client: Queryable, deviceId: string, startAt: Date, endAt: Date
+): Promise<DgMovement> {
+  const g = (await client.query(GPS_SPREAD_SQL, [deviceId, startAt, endAt])).rows[0];
+  const fixes = Number(g?.n || 0);
+  if (fixes < MIN_FIXES_FOR_MOVE || g?.lat_lo === null || g?.lat_lo === undefined) {
+    return { spreadKm: null, fixes, moved: false };
+  }
+  const spreadKm = round(haversineKm(+g.lat_lo, +g.lon_lo, +g.lat_hi, +g.lon_hi), 2);
+  return { spreadKm, fixes, moved: spreadKm !== null && spreadKm > DG_MOVED_KM };
+}
+
+// ─── Assembling a daily strip ────────────────────────────────────────────────
+
+/**
+ * Merge the engine and output groups into one row per day, zero-filled across
+ * `days` so a day the unit never ran still appears in the chart. Either group
+ * may be missing — that is the whole point of settling them independently.
+ */
+export function buildDgDaily(
+  days: string[], engine: DgEngine | null, output: DgOutput | null
+): DgDay[] {
+  return days.map((day) => {
+    const e = engine?.daily.get(day);
+    const o = output?.daily.get(day);
+    return {
+      day,
+      engineOnHours: e?.hours ?? 0,
+      loadHours:     o?.loadHours ?? 0,
+      starts:        e?.starts ?? 0,
+      avgAmps:       o?.avgAmps ?? null,
+    };
+  });
 }
 
 /** IST calendar days covered by [startAt, endAt), inclusive of both ends. */

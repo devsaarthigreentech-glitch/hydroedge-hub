@@ -75,6 +75,63 @@ behind them (`/api/analytics`, `/trips`, `/idle`) are no longer even called for 
 DG — they are the expensive queries on that page and none of their output was
 rendered.
 
+## Performance — why the tab timed out, and what fixes it
+
+The first version ran one statement with eight CTEs over `io_records`. On a 46 GB
+/ 314 M-row table sharing a 1 vCPU host with the GPS ingest, that is a single
+long query — and one timeout returned `Error: timeout exceeded` with nothing
+else, throwing away the engine run time along with everything slow.
+
+Four things changed, in order of how much they matter:
+
+**1. Build the index from migration 002.** This is the real fix and it is not
+code. Every query here is `device_id = ? AND io_id = ? AND timestamp BETWEEN ?`,
+which is exactly what `idx_io_records_device_io_ts (device_id, io_id, timestamp)`
+serves. Without it Postgres scans backwards on `(device_id, timestamp)`
+discarding rows by `io_id`, once per signal. Check whether it exists:
+
+```bash
+psql -c "SELECT indexrelname, idx_scan FROM pg_stat_user_indexes WHERE indexrelname = 'idx_io_records_device_io_ts';"
+```
+
+If it returns nothing, build it — read the warnings in the migration first, it
+takes hours on this hardware and needs disk headroom:
+
+```bash
+node scripts/apply-migration.js db/migrations/002_analytics_source_indexes.sql --no-transaction
+```
+
+**2. One query per signal group, settled independently.** `engine` (Din.1),
+`output` (Ain.1), `health` (supply/battery/GSM/coverage) and `movement` (GPS) now
+run as separate statements. A slow group blanks its own tiles and is named in the
+response's `degraded` list; the rest of the page is still correct. Each group has
+a 12 s ceiling, under the pool's 15 s `statement_timeout`.
+
+**3. The Ain.1 ↔ Din.1 self-join is gone.** Output current used to be joined to a
+same-instant `Din.1 = 1` row to prove the engine was running. That was the most
+expensive thing on the page and proved nothing: a genset cannot put out more than
+2 A stopped, so `amps > 2` already implies running. A join of two 100 k-row
+ranges became one range scan.
+
+**4. No second connection pool.** The route briefly opened its own pool with a
+longer `statement_timeout`. On a host already tight on connections that produced
+`timeout exceeded when trying to connect` — a *connection* timeout, not a query
+one. It now uses the shared pool from `@/lib/db` like everything else.
+
+Also: keeping `scripts/rollup-daily-summary.js` on cron means
+`device_daily_summary.engine_on_hours` covers recent days, and the route falls
+back to it for the headline figure when the live scan cannot finish.
+
+```
+*/15 * * * *  cd /srv/app && node scripts/rollup-daily-summary.js --today --changed-only
+20   0 * * *  cd /srv/app && node scripts/rollup-daily-summary.js --days 3
+```
+
+If the tab is still slow after all this, the next step is extending
+`device_daily_summary` with the DG columns (load hours, starts, amps, supply) and
+serving the whole tab from the rollup — the same treatment the vehicle analytics
+already had.
+
 ## Movement
 
 Distance means one thing for a genset: has somebody moved it. `DG_MOVED_KM` is
@@ -90,9 +147,21 @@ so all three agree. Change it in `src/lib/dg-metrics.ts` and everything follows.
 
 `MapTab` delegates to `DgMapTab` for a DG. Route playback is gone — a generator
 has no route, and the polyline was GNSS jitter around one point drawn as a
-journey. What is there instead: the installed position, a circle showing how far
-the fixes spread over 7 / 30 / 90 days, the last fix time, and the movement
-verdict.
+journey.
 
-A 3D genset model on the map is the intended next step; this flat marker version
-carries the position and drift logic it would sit on.
+There is **no time-range picker**. "Where is this unit installed" has one answer,
+not three; the drift check behind it runs over a fixed 30 days
+(`DRIFT_WINDOW_DAYS`) and is never surfaced as a control.
+
+The base layer toggles between **satellite** (default) and street. A genset
+usually sits in a yard or a field where the street map is empty white space, so
+imagery is what actually confirms which plot the unit is on. Zoom opens at 16
+rather than 17 — one notch out is the difference between recognisable
+surroundings and a featureless square.
+
+The drift figure comes from `?only=movement`, which reads `gps_records` and
+nothing else, so a slow `io_records` query can no longer blank the map. The
+marker is drawn from the device row and appears without waiting for it.
+
+A 3D genset model instead of the plain marker is the intended next step; this
+flat version carries the position and drift logic it would sit on.
