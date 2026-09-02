@@ -16,6 +16,8 @@
 // Email clients strip most CSS, so the layout is tables with inline styles.
 // ============================================================================
 
+import { DG_MOVED_KM } from "@/lib/dg-metrics";
+
 export type DeviceBrand = "GreenX" | "GreenDrive";
 export type DeviceWeekStatus = "healthy" | "attention" | "no_data";
 
@@ -293,8 +295,10 @@ function deviceCard(d: DeviceWeekly): string {
     if (d.waterEpisodes > 0) {
       notes.push(noteLine("💧", `Water shortage detected ${d.waterEpisodes} time${d.waterEpisodes === 1 ? "" : "s"} (${fmtHours(d.waterShortHours)} of engine-on time). Keep the tanks topped up.`, C.amber, C.amberBg, C.amberBorder));
     }
-    if (!isDrive && d.displacementKm !== null && d.displacementKm > 0.3) {
-      notes.push(noteLine("📍", `Position changed by about ${d.displacementKm.toFixed(1)} km during the week. A stationary DG should not move — please confirm it was relocated.`, C.red, C.redBg, C.redBorder));
+    // Threshold shared with the Analytics tab — see DG_MOVED_KM for why it is
+    // set well clear of GNSS wander rather than at "has it shifted at all".
+    if (!isDrive && d.displacementKm !== null && d.displacementKm > DG_MOVED_KM) {
+      notes.push(noteLine("📍", `Position moved about ${d.displacementKm.toFixed(1)} km during the week, past the ${DG_MOVED_KM} km limit. A stationary DG should not move — please confirm it was relocated.`, C.red, C.redBg, C.redBorder));
     }
     if (d.setAmps !== null && d.avgAmps !== null && Math.abs(d.avgAmps - d.setAmps) > d.setAmps * 0.1) {
       notes.push(noteLine("⚡", `Average output ${d.avgAmps.toFixed(1)} A is outside ±10% of the ${d.setAmps.toFixed(1)} A setpoint.`, C.amber, C.amberBg, C.amberBorder));

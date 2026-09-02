@@ -5,6 +5,12 @@ import {
   buildWeeklyReportHtml, weeklyReportSubject, fleetSummary, dayLabel,
   DeviceWeekly, WeeklyReportData, WeeklyDay, WeeklyAlertLine, DeviceBrand,
 } from "@/lib/weekly-report";
+// Engine/electrical numbers and the movement rule live in one module so the
+// Analytics tab and this report can never quote different figures for the
+// same week — including the threshold at which a DG counts as relocated.
+import {
+  computeDgMetrics, computeDgMovement, currentDivisorFor,
+} from "@/lib/dg-metrics";
 
 // ============================================================================
 // POST /api/reports/weekly — send each company its weekly unit report
@@ -57,14 +63,6 @@ const pool = new Pool({
 const REPORTING_TZ       = "Asia/Kolkata";
 const IST_OFFSET         = "+05:30";       // IST has no DST, so a fixed offset is exact
 const SILENT_AFTER_DAYS  = 30;             // 'auto' rule: must have reported this recently
-const LOAD_THRESHOLD_A   = 2;              // "under load" = output current above this
-const GAP_CAP_SECONDS    = 300;            // same cap as the daily rollup (migration 001)
-const MIN_RUN_SECONDS    = 60;             // ignore Din.1 bounces shorter than this
-const MOVED_KM           = 0.3;            // a DG whose fixes spread further than this "moved"
-const MIN_FIXES_FOR_MOVE = 10;
-
-/** Ain.1 → amps. FMC650 uses a different current transducer from the FMB family. */
-const CURRENT_DIVISOR: Record<string, number> = { FMC650: 47, FMB150: 83, FMB120: 83 };
 const SERIES_NAME = /^SGT-G[DXMI]-\d{4}-\d+$/;
 
 // ─── Date helpers (IST calendar) ─────────────────────────────────────────────
@@ -170,135 +168,10 @@ function modelOf(row: DeviceRow): string {
 
 // ─── Per-device metrics ──────────────────────────────────────────────────────
 
-// One pass over the week's IO 1 / IO 9 rows. The engine-hours rule is the
-// rollup's (gaps between consecutive ON samples, capped at GAP_CAP_SECONDS) so
-// this report and the Analytics tab agree on the same week.
-const METRICS_SQL = `
-WITH din AS (
-  SELECT timestamp,
-         io_value::int AS v,
-         (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS day
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 1
-     AND timestamp >= $2 AND timestamp < $3
-),
-on_gaps AS (
-  SELECT day,
-         EXTRACT(EPOCH FROM (LEAD(timestamp) OVER (ORDER BY timestamp) - timestamp)) AS secs
-    FROM din
-   WHERE v = 1
-),
-engine_daily AS (
-  SELECT day, SUM(secs) / 3600.0 AS hours
-    FROM on_gaps
-   WHERE secs > 0 AND secs <= $5
-   GROUP BY day
-),
-edges AS (
-  SELECT timestamp, day, v, LAG(v) OVER (ORDER BY timestamp) AS prev
-    FROM din
-),
-starts AS (
-  SELECT timestamp, day FROM edges WHERE v = 1 AND prev = 0
-),
-trans AS (
-  SELECT timestamp, v FROM edges WHERE prev IS NULL OR v <> prev
-),
-runs AS (
-  SELECT v,
-         EXTRACT(EPOCH FROM (
-           COALESCE(LEAD(timestamp) OVER (ORDER BY timestamp), (SELECT MAX(timestamp) FROM din))
-           - timestamp
-         )) AS secs
-    FROM trans
-),
-amps AS (
-  SELECT a.timestamp,
-         (a.timestamp AT TIME ZONE 'Asia/Kolkata')::date AS day,
-         a.io_value::numeric / $4 AS amps
-    FROM io_records a
-    JOIN io_records d
-      ON  d.device_id = a.device_id
-      AND d.timestamp = a.timestamp
-      AND d.io_id     = 1
-      AND d.io_value::numeric = 1
-      AND d.timestamp >= $2 AND d.timestamp < $3
-   WHERE a.device_id = $1 AND a.io_id = 9
-     AND a.timestamp >= $2 AND a.timestamp < $3
-),
-load_gaps AS (
-  SELECT EXTRACT(EPOCH FROM (LEAD(timestamp) OVER (ORDER BY timestamp) - timestamp)) AS secs
-    FROM amps
-   WHERE amps > $6
-),
-amps_daily AS (
-  SELECT day, AVG(amps) FILTER (WHERE amps > $6) AS avg_amps
-    FROM amps
-   GROUP BY day
-),
-coverage AS (
-  SELECT COUNT(DISTINCT date_trunc('hour', timestamp)) AS hours
-    FROM io_records
-   WHERE device_id = $1 AND timestamp >= $2 AND timestamp < $3
-),
-supply AS (
-  SELECT MIN(io_value::numeric) / 1000.0 AS min_v,
-         AVG(io_value::numeric) / 1000.0 AS avg_v
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 66
-     AND timestamp >= $2 AND timestamp < $3
-     AND io_value::numeric > 0
-),
-battery AS (
-  SELECT MIN(io_value::numeric) / 1000.0 AS min_v
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 67
-     AND timestamp >= $2 AND timestamp < $3
-     AND io_value::numeric > 0
-),
-gsm AS (
-  SELECT AVG(io_value::numeric) AS avg_pct
-    FROM io_records
-   WHERE device_id = $1 AND io_id = 21
-     AND timestamp >= $2 AND timestamp < $3
-)
-SELECT
-  (SELECT COALESCE(SUM(hours), 0) FROM engine_daily)                                   AS engine_on_hours,
-  (SELECT COUNT(*) FROM starts)                                                        AS starts,
-  (SELECT COALESCE(MAX(secs), 0) FROM runs WHERE v = 1 AND secs >= $7)                 AS longest_run_secs,
-  (SELECT COALESCE(SUM(secs), 0) / 3600.0 FROM load_gaps WHERE secs > 0 AND secs <= $5) AS load_hours,
-  (SELECT AVG(amps) FROM amps WHERE amps > $6)                                         AS avg_amps,
-  (SELECT MAX(amps) FROM amps)                                                         AS peak_amps,
-  (SELECT hours FROM coverage)                                                         AS hours_with_data,
-  (SELECT min_v FROM supply)                                                           AS supply_min_v,
-  (SELECT avg_v FROM supply)                                                           AS supply_avg_v,
-  (SELECT min_v FROM battery)                                                          AS battery_min_v,
-  (SELECT avg_pct FROM gsm)                                                            AS gsm_avg_pct,
-  (SELECT COALESCE(json_agg(json_build_object('day', day, 'hours', hours) ORDER BY day), '[]'::json)
-     FROM engine_daily)                                                                AS engine_daily,
-  (SELECT COALESCE(json_agg(json_build_object('day', day, 'n', n) ORDER BY day), '[]'::json)
-     FROM (SELECT day, COUNT(*) AS n FROM starts GROUP BY day) s)                      AS starts_daily,
-  (SELECT COALESCE(json_agg(json_build_object('day', day, 'avg', avg_amps) ORDER BY day), '[]'::json)
-     FROM amps_daily)                                                                  AS amps_daily
-`;
-
-// A stationary DG's fixes should all sit within GPS jitter of one spot. The
-// 2nd/98th percentiles throw away the occasional wild fix a cheap GNSS
-// produces, so one bad packet cannot report a genset as having moved.
-const GPS_SPREAD_SQL = `
-SELECT COUNT(*) AS n,
-       percentile_cont(0.02) WITHIN GROUP (ORDER BY latitude)  AS lat_lo,
-       percentile_cont(0.98) WITHIN GROUP (ORDER BY latitude)  AS lat_hi,
-       percentile_cont(0.02) WITHIN GROUP (ORDER BY longitude) AS lon_lo,
-       percentile_cont(0.98) WITHIN GROUP (ORDER BY longitude) AS lon_hi
-  FROM gps_records
- WHERE device_id = $1
-   AND timestamp >= $2 AND timestamp < $3
-   AND latitude  BETWEEN -90  AND 90
-   AND longitude BETWEEN -180 AND 180
-   AND latitude <> 0 AND longitude <> 0
-   AND satellites >= 4
-`;
+// Engine hours, load hours, starts, current and the position check all come
+// from src/lib/dg-metrics.ts — the same code the Analytics tab calls, so the
+// email and the screen cannot drift apart. Only the report-specific lookups
+// below (water episodes, alert history) are still queried here.
 
 const WATER_SQL = `
 SELECT COUNT(*)::int AS episodes, COALESCE(SUM(short_seconds), 0)::bigint AS secs
@@ -317,15 +190,6 @@ SELECT alert_id, severity, MAX(message) AS message, COUNT(*)::int AS n
  ORDER BY MAX(sent_at) DESC
 `;
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
 const num = (v: unknown): number | null => {
   if (v === null || v === undefined) return null;
   const n = parseFloat(String(v));
@@ -335,41 +199,27 @@ const round = (v: number | null, d = 1): number | null =>
   v === null ? null : parseFloat(v.toFixed(d));
 
 async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables: Tables): Promise<DeviceWeekly> {
-  const divisor = CURRENT_DIVISOR[row.device_type] ?? 83;
+  const divisor = currentDivisorFor(row.device_type);
   const args = [row.id, week.startAt, week.endAt];
 
-  const m = (await client.query(METRICS_SQL, [
-    ...args, divisor, GAP_CAP_SECONDS, LOAD_THRESHOLD_A, MIN_RUN_SECONDS,
-  ])).rows[0];
+  // The seven IST days of the week, so a day the unit never ran still appears
+  // in the strip as a zero rather than dropping out of the chart.
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(week.start, i));
 
-  // ── Daily strip: every day of the week, zero-filled ────────────────────────
-  const byDay = <T,>(arr: Array<Record<string, unknown>>, key: string): Map<string, T> =>
-    new Map(arr.map((x) => [String(x.day).slice(0, 10), x[key] as T]));
-  const engineByDay = byDay<number>(m.engine_daily || [], "hours");
-  const startsByDay = byDay<number>(m.starts_daily || [], "n");
-  const ampsByDay   = byDay<number | null>(m.amps_daily || [], "avg");
+  const [metrics, movement] = await Promise.all([
+    computeDgMetrics(client, row.id, row.device_type, week.startAt, week.endAt, weekDays),
+    computeDgMovement(client, row.id, week.startAt, week.endAt),
+  ]);
 
-  const daily: WeeklyDay[] = [];
-  for (let i = 0; i < 7; i++) {
-    const day = addDays(week.start, i);
-    daily.push({
-      day, label: dayLabel(day),
-      engineOnHours: round(num(engineByDay.get(day)) ?? 0, 2) ?? 0,
-      starts: num(startsByDay.get(day)) ?? 0,
-      avgAmps: round(num(ampsByDay.get(day)), 1),
-    });
-  }
+  const daily: WeeklyDay[] = metrics.daily.map((d) => ({
+    day: d.day,
+    label: dayLabel(d.day),
+    engineOnHours: d.engineOnHours,
+    starts: d.starts,
+    avgAmps: d.avgAmps,
+  }));
 
-  // ── Movement ───────────────────────────────────────────────────────────────
-  let displacementKm: number | null = null;
-  try {
-    const g = (await client.query(GPS_SPREAD_SQL, args)).rows[0];
-    if (g && Number(g.n) >= MIN_FIXES_FOR_MOVE && g.lat_lo !== null) {
-      displacementKm = round(haversineKm(+g.lat_lo, +g.lon_lo, +g.lat_hi, +g.lon_hi), 2);
-    }
-  } catch (err: any) {
-    console.warn(`[weekly] gps spread failed for ${row.device_name}: ${err.message}`);
-  }
+  const displacementKm = movement.spreadKm;
 
   // ── Water shortage episodes (table may not exist on older installs) ────────
   let waterEpisodes = 0, waterShortHours = 0;
@@ -396,11 +246,11 @@ async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables
     }
   }
 
-  const hoursWithData = Number(m.hours_with_data || 0);
-  const engineOnHours = round(num(m.engine_on_hours) ?? 0, 2) ?? 0;
-  const loadHours     = round(num(m.load_hours) ?? 0, 2) ?? 0;
+  const hoursWithData = metrics.hoursWithData;
+  const engineOnHours = metrics.engineOnHours;
+  const loadHours     = metrics.loadHours;
   const setAmps       = round(num(row.set_ain1_raw) !== null ? (num(row.set_ain1_raw) as number) / divisor : null, 1);
-  const avgAmps       = round(num(m.avg_amps), 1);
+  const avgAmps       = metrics.avgAmps;
   const isDrive       = row.asset_name === "EOW";
 
   // ── Status ─────────────────────────────────────────────────────────────────
@@ -411,7 +261,7 @@ async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables
   } else {
     if (alerts.length > 0) causes.push(`${alerts.length} alert${alerts.length === 1 ? "" : "s"}`);
     if (waterEpisodes > 0) causes.push("water shortage");
-    if (!isDrive && displacementKm !== null && displacementKm > MOVED_KM) causes.push("position changed");
+    if (!isDrive && movement.moved) causes.push("position changed");
     if (engineOnHours > 0 && loadHours < engineOnHours * 0.5) causes.push("low output while running");
     if (setAmps !== null && avgAmps !== null && Math.abs(avgAmps - setAmps) > setAmps * 0.1) causes.push("output outside setpoint band");
     if (causes.length) status = "attention";
@@ -431,15 +281,15 @@ async function computeDeviceWeek(client: any, row: DeviceRow, week: Week, tables
     dataAvailabilityPct: Math.round((hoursWithData / 168) * 100),
     engineOnHours,
     loadHours,
-    starts: Number(m.starts || 0),
-    longestRunHours: round(Number(m.longest_run_secs || 0) / 3600, 2) ?? 0,
+    starts: metrics.starts,
+    longestRunHours: metrics.longestRunHours,
     avgAmps,
-    peakAmps: round(num(m.peak_amps), 1),
+    peakAmps: metrics.peakAmps,
     setAmps,
-    supplyMinV: round(num(m.supply_min_v), 1),
-    supplyAvgV: round(num(m.supply_avg_v), 1),
-    batteryMinV: round(num(m.battery_min_v), 2),
-    gsmAvgPct: round(num(m.gsm_avg_pct), 0),
+    supplyMinV: metrics.supplyMinV,
+    supplyAvgV: metrics.supplyAvgV,
+    batteryMinV: metrics.batteryMinV,
+    gsmAvgPct: metrics.gsmAvgPct,
     waterEpisodes,
     waterShortHours,
     displacementKm,

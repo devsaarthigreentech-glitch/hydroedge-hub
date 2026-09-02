@@ -63,8 +63,21 @@ const SHARED_IO_MAP: Record<number, IOParam> = {
   202: { name: "lls.1.temperature",                unit: "°C",      category: "temperature" },
   203: { name: "lls.2.fuel.level",                 unit: "l",       category: "fuel" },
   204: { name: "lls.2.temperature",                unit: "°C",      category: "temperature" },
+};
 
-  // ── CAN Adapter elements (LV-CAN works on BOTH FMB150 and FMC650) ────────
+// ─── CAN adapter elements ─────────────────────────────────────────────────────
+// These meanings hold ONLY when an LV-CAN200 / ALL-CAN300 adapter is physically
+// wired to the engine. They are NOT universal Teltonika IDs — on an FMB1YX with
+// no adapter the same ids mean something completely different:
+//
+//   14  ICCID part 2        was shown as can.engine.worktime → 2,665,580,198 min
+//   18  accelerometer Y     was shown as can.fuel.rate       → fuel on a dead engine
+//   19  accelerometer Z     was shown as can.adblue.level    → 1014 % (i.e. 1014 mG ≈ 1 g)
+//
+// That is why this block is merged per device type in getIOMap() instead of
+// living in SHARED_IO_MAP. Adding a type here asserts the adapter is fitted;
+// getting that wrong feeds accelerometer noise into the fuel analytics.
+const CAN_ADAPTER_IO_MAP: Record<number, IOParam> = {
   14:  { name: "can.engine.worktime",              unit: "min",     category: "can" },
   15:  { name: "can.engine.worktime.counted",      unit: "min",     category: "can" },
   18:  { name: "can.fuel.rate",                    unit: "l/h",     category: "can",         multiplier: 0.1 },
@@ -109,8 +122,10 @@ const FMB150_ONLY: Record<number, IOParam> = {
   16:  { name: "vehicle.mileage",                  unit: "km",   category: "vehicle", multiplier: 0.001 },
   // Accelerometer (FMB150 uses 17/18/19)
   17:  { name: "accelerometer.x",                  unit: "mG",  category: "motion" },
-  // NOTE: 18 is CAN fuel rate in shared — on FMB150 without CAN it's accel Y
-  // Since this device HAS CAN, 18 stays as can.fuel.rate from SHARED_IO_MAP
+  // NOTE: 18 is accelerometer Y on a bare FMB150. The FMB150 units in this fleet
+  // carry a CAN adapter, so getIOMap merges CAN_ADAPTER_IO_MAP for this type and
+  // 18 resolves to can.fuel.rate. If an FMB150 is ever deployed WITHOUT the
+  // adapter it needs its own type here, or its accelerometer will be read as fuel.
   19:  { name: "accelerometer.z",                  unit: "mG",  category: "motion" },
   // Battery Level % — FMB150 only (FMC650 ID 113 = FMS service distance)
   113: { name: "battery.level",                    unit: "%",   category: "power" },
@@ -167,18 +182,66 @@ const FMC650_ONLY: Record<number, IOParam> = {
   250:{name: "trip.status" , category: "system" }
 };
 
+// ─── FMB120-specific IDs ──────────────────────────────────────────────────────
+// FMB120 is the same FMB1YX family as FMB150, but the units in this fleet have
+// NO CAN adapter — they are wired straight to the genset (Din.1 run status,
+// Ain.1 current). So the ids the CAN map claims are declared here with their
+// real FMB1YX meanings, and getIOMap does not merge CAN_ADAPTER_IO_MAP for it.
+//
+// Without these entries the telemetry tab rendered a "CAN Bus Data" section out
+// of an ICCID fragment and two accelerometer axes: engine worktime of
+// 2,665,580,198 min, a fuel rate on a stopped engine, and an AdBlue level of
+// 1014% — which is simply 1014 mG, gravity on a stationary device.
+
+const FMB120_ONLY: Record<number, IOParam> = {
+  80:  { name: "data.mode.enum",                   category: "system" },
+  69:  { name: "gnss.state.enum",                  category: "gps" },
+  16:  { name: "vehicle.mileage",                  unit: "km",   category: "vehicle", multiplier: 0.001 },
+
+  // Accelerometer — the three ids the CAN map would otherwise claim.
+  17:  { name: "accelerometer.x",                  unit: "mG",  category: "motion" },
+  18:  { name: "accelerometer.y",                  unit: "mG",  category: "motion" },
+  19:  { name: "accelerometer.z",                  unit: "mG",  category: "motion" },
+
+  // SIM identity. 14 is ICCID part 2, NOT engine worktime.
+  11:  { name: "sim.iccid1",                       category: "system" },
+  14:  { name: "sim.iccid2",                       category: "system" },
+
+  // GNSS speed, not CAN vehicle speed.
+  24:  { name: "position.speed.gnss",              unit: "km/h", category: "gps" },
+
+  // Analog Input 2 (FMB1YX uses id 6), battery level, SD card, network.
+  6:   { name: "ain.2",                            unit: "V",   category: "analog", multiplier: 0.001 },
+  113: { name: "battery.level",                    unit: "%",   category: "power" },
+  10:  { name: "sd.card.status",                   category: "system" },
+  237: { name: "network.type",                     category: "system" },
+
+  // Pulse counters on the digital inputs.
+  4:   { name: "pulse.counter.din1",               category: "digital" },
+  5:   { name: "pulse.counter.din2",               category: "digital" },
+};
+
 // ─── Build device-specific map using EXACT device_type strings from DB ────────
+//
+// CAN_ADAPTER_IO_MAP is merged ONLY for types whose units actually carry an
+// LV-CAN / ALL-CAN adapter. Everything else gets the bare Teltonika meanings,
+// so an id the device reports for another purpose is never dressed up as engine
+// data. A device whose device_type was never set lands in the fallback, which
+// is why an unset type shows fewer parameters rather than wrong ones.
 
 function getIOMap(deviceType: string): Record<number, IOParam> {
   const type = (deviceType || '').trim();
 
   if (type === 'FMC650') {
-    return { ...SHARED_IO_MAP, ...FMC650_ONLY };
+    return { ...SHARED_IO_MAP, ...CAN_ADAPTER_IO_MAP, ...FMC650_ONLY };
   }
   if (type === 'FMB150') {
-    return { ...SHARED_IO_MAP, ...FMB150_ONLY };
+    return { ...SHARED_IO_MAP, ...CAN_ADAPTER_IO_MAP, ...FMB150_ONLY };
   }
-  // 'Teltonika' or anything unknown — shared only, no wrong assumptions
+  if (type === 'FMB120') {
+    return { ...SHARED_IO_MAP, ...FMB120_ONLY };
+  }
+  // 'Teltonika' or anything unknown — shared only, and NO CAN assumptions.
   return { ...SHARED_IO_MAP };
 }
 

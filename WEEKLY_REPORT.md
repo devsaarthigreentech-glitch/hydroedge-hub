@@ -6,6 +6,8 @@ performance summary, not an alert feed — the alert digest in
 [NOTIFICATIONS.md](NOTIFICATIONS.md) still handles faults day to day.
 
 Route: `src/app/api/reports/weekly/route.ts`. Template: `src/lib/weekly-report.ts`.
+Metrics: `src/lib/dg-metrics.ts` (shared with the Analytics tab — see
+[DG_ANALYTICS.md](DG_ANALYTICS.md)).
 
 ## Setup
 
@@ -48,7 +50,9 @@ support on CC.
 
 ## What is in it
 
-Per unit, for the week:
+Per unit, for the week. The engine and electrical figures are computed by
+`src/lib/dg-metrics.ts`, the same module behind the Analytics tab, so the email
+and the screen cannot quote different numbers for the same period.
 
 | Figure | Source | Notes |
 | --- | --- | --- |
@@ -59,7 +63,7 @@ Per unit, for the week:
 | Supply voltage, tracker battery | IO 66, IO 67 | Minimum for the week — a sagging supply shows up here before it strands the unit. |
 | GSM signal | IO 21 | Weekly average. |
 | Data availability | any packet | Clock hours with at least one packet, out of 168. Under 50% is flagged as under-counted. |
-| Position changed | `gps_records` | Spread of the week's fixes (2nd–98th percentile). Over 300 m on a DG is flagged — a stationary genset should not move. |
+| Position changed | `gps_records` | Spread of the week's fixes (2nd–98th percentile). Over `DG_MOVED_KM` (20 km) on a DG is flagged — a stationary genset should not move. |
 | Water shortage | `device_water_short_log` | Episodes overlapping the week and engine-on time spent short. |
 | Alerts | `notification_log` | Each distinct alert the scan raised, and how many times. |
 

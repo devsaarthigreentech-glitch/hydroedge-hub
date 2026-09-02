@@ -855,6 +855,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { DgAnalyticsTab } from "./DgAnalyticsTab";
 
 interface AnalyticsTabProps { device: Device; }
 
@@ -1209,6 +1210,11 @@ function formatDay(dayStr: string) {
 // ── Main component ────────────────────────────────────────────────────────────
 export function AnalyticsTab({ device }: AnalyticsTabProps) {
   const isMobile = useIsMobile();
+
+  // A stationary generator gets a different set of sections entirely — see
+  // DgAnalyticsTab. The window picker below is shared by both modes.
+  const isDg = device.asset_name === "DG";
+
   const [days, setDays] = useState(1);
 
   const [customMode, setCustomMode] = useState(false);
@@ -1320,13 +1326,19 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
     finally { setIdleLoading(false); }
   }, [device.id, days, customMode, startDate, startTime, endDate, endTime]);
 
+  // These three endpoints scan gps_records and io_records for trips, idle
+  // islands and fuel. None of it is rendered for a DG, and on a 1 vCPU database
+  // they are the expensive queries on this page — so skip them entirely rather
+  // than fetching results that are then thrown away.
   useEffect(() => {
+    if (isDg) return;
     if (!customMode) { fetchFuel(); fetchIdle(); fetchTrips(); }
-  }, [device.id, days]);
+  }, [device.id, days, isDg]);
 
   useEffect(() => {
+    if (isDg) return;
     if (customMode && startDate && endDate) { fetchFuel(); fetchIdle(); fetchTrips(); }
-  }, [customMode, startDate, startTime, endDate, endTime, device.id]);
+  }, [customMode, startDate, startTime, endDate, endTime, device.id, isDg]);
 
   const handleConfirm = (sd:string, st:string, ed:string, et:string) => {
     setStartDate(sd); setStartTime(st); setEndDate(ed); setEndTime(et); setCustomMode(true);
@@ -1437,10 +1449,10 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
       }}>
         <div>
           <div style={{ fontSize: isMobile ? 17 : 20, fontWeight:800, color:THEME.text.primary, letterSpacing:-0.5 }}>
-            📊 Fleet Analytics
+            {isDg ? "⚙️ Generator Analytics" : "📊 Fleet Analytics"}
           </div>
           <div style={{ fontSize: isMobile ? 11 : 13, color:THEME.text.secondary, marginTop:3 }}>
-            Fuel · Trips · Idle time
+            {isDg ? "Run time · Output · Power" : "Fuel · Trips · Idle time"}
           </div>
         </div>
 
@@ -1488,6 +1500,18 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
           borderRadius:12,color:"#dc2626",fontSize:13,marginBottom:20}}>⚠️ {error}</div>
       )}
 
+      {/* A DG is not a vehicle: distance, km/L, trips and idle time all
+          describe travel it never does. It gets its own sections instead. */}
+      {isDg ? (
+        <DgAnalyticsTab
+          device={device}
+          days={days}
+          startIso={customMode && startDate && endDate ? toISTIso(startDate, startTime) : null}
+          endIso={customMode && startDate && endDate ? toISTIso(endDate, endTime) : null}
+          windowLabel={windowSub}
+        />
+      ) : (
+        <>
       {/* ── SECTION 1: FUEL EFFICIENCY ── */}
       <div style={{ display:"flex", flexDirection: isMobile ? "column" : "row",
         justifyContent:"space-between", alignItems: isMobile ? "flex-start" : "flex-end",
@@ -1723,6 +1747,8 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
               No idle events ≥ 5 min detected.
             </Card>
           )}
+        </>
+      )}
         </>
       )}
     </div>

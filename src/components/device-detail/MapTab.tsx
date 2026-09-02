@@ -916,12 +916,23 @@ import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
 import { timeAgo } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { DgMapTab } from "./DgMapTab";
 
 interface MapTabProps {
   device: Device;
 }
 
 export function MapTab({ device }: MapTabProps) {
+  // A generator has no route to play back. Hand it to the installed-location
+  // view before any of the route-history state below is set up, so the vehicle
+  // map's polling never runs for a device that cannot travel.
+  if (device.asset_name === "DG") {
+    return <DgMapTab device={device} />;
+  }
+  return <VehicleMapTab device={device} />;
+}
+
+function VehicleMapTab({ device }: MapTabProps) {
   const isMobile = useIsMobile();
   const mapRef = useRef<any>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
