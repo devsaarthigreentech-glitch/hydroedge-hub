@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw } = body;
+        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw, weekly_report } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -113,6 +113,19 @@ export async function PATCH(
             }
             updates.push(`set_ain1_raw = $${paramCount}`);
             values.push(raw);
+            paramCount++;
+        }
+
+        // Weekly report inclusion override — see db/migrations/008.
+        if (weekly_report !== undefined) {
+            if (!['auto', 'always', 'never'].includes(weekly_report)) {
+                return NextResponse.json(
+                    { success: false, error: 'Weekly report must be auto, always, or never' },
+                    { status: 400 }
+                );
+            }
+            updates.push(`weekly_report = $${paramCount}`);
+            values.push(weekly_report);
             paramCount++;
         }
 

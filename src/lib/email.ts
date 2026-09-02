@@ -649,6 +649,58 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
 }
 
 // ============================================================================
+// Send an arbitrary HTML email through the same transporter
+// ----------------------------------------------------------------------------
+// Used by the weekly customer report (src/lib/weekly-report.ts), which builds
+// its own HTML. Recipient handling is identical to the alert batch: the To
+// list is de-duplicated, and support is CC'd unless the caller passes its own
+// cc list (an empty array means "no CC", which is what test mode wants).
+// ============================================================================
+
+export interface HtmlEmailData {
+  to: string[];
+  cc?: string[];
+  subject: string;
+  html: string;
+  /** Display name for the From header. Defaults to the alerts sender name. */
+  fromName?: string;
+}
+
+export async function sendHtmlEmail(data: HtmlEmailData): Promise<{
+  success: boolean;
+  sentTo: string[];
+  ccTo: string[];
+  error?: string;
+}> {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+    return { success: false, sentTo: [], ccTo: [], error: "GMAIL_USER and GMAIL_APP_PASSWORD not configured" };
+  }
+
+  const toList = [...new Set(data.to.filter(Boolean))];
+  const ccList = [...new Set(
+    (data.cc || SUPPORT_EMAILS).filter((email) => !toList.includes(email) && email)
+  )];
+
+  if (toList.length === 0 && ccList.length === 0) {
+    return { success: false, sentTo: [], ccTo: [], error: "No recipients" };
+  }
+
+  try {
+    await transporter.sendMail({
+      from: `"${data.fromName || FROM_NAME}" <${FROM_ADDRESS}>`,
+      to: toList.join(", "),
+      cc: ccList.length > 0 ? ccList.join(", ") : undefined,
+      subject: data.subject,
+      html: data.html,
+    });
+    return { success: true, sentTo: toList, ccTo: ccList };
+  } catch (err: any) {
+    console.error("[EMAIL ERROR]", err.message);
+    return { success: false, sentTo: toList, ccTo: ccList, error: err.message };
+  }
+}
+
+// ============================================================================
 // Send test email (unchanged)
 // ============================================================================
 

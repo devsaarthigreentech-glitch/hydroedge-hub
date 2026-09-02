@@ -96,7 +96,15 @@ export async function GET(request: NextRequest) {
         d.notes, d.tested, d.name_locked,
         d.created_at, d.updated_at,
         d.last_latitude, d.last_longitude, d.last_location_time,
-        d.last_contact_at
+        d.last_contact_at,
+        -- Edit tab / health panel settings (migrations 006, 007). Without these
+        -- the admin UI showed "Not set" / "Not configured" on every fresh load
+        -- even when a value was stored, because the row never carried them.
+        d.system_voltage, d.set_ain1_raw,
+        -- Weekly report override (migration 008). Read through to_jsonb so a
+        -- database that has not run 008 yet returns 'auto' instead of failing
+        -- the whole device list with a missing-column error.
+        COALESCE(to_jsonb(d) ->> 'weekly_report', 'auto') AS weekly_report
       FROM devices d
       WHERE d.deleted_at IS NULL
     `;

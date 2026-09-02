@@ -65,6 +65,12 @@ export interface Device {
    * FMB). Shown to users as amps. NULL = not commissioned; alarms suppressed.
    */
   set_ain1_raw?: number | null;
+  /**
+   * Weekly customer report inclusion (migration 008). 'auto' applies the rule
+   * (active + commissioned + reported within 30 days); 'always' / 'never'
+   * overrule it for one device.
+   */
+  weekly_report?: "auto" | "always" | "never";
 }
 
 // export interface TelemetryParameter {

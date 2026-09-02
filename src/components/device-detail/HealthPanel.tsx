@@ -1777,7 +1777,9 @@ export function GreenXHealthPanel({
   const isFMC650 = deviceType === "FMC650";
   const isFMB150 = deviceType === "FMB150";
   const isFMB120 = deviceType === "FMB120";                 // NEW
-  const isMini   = deviceModel === "MINI";   // BRANDING ONLY (product name / model badge / beta tag)
+  // "MINI" means the DG carries no KVA rating in its name and reports through
+  // FMB-class hardware. It only affects the model badge — never the brand.
+  const isMini   = deviceModel === "MINI";
   const isEOW    = deviceModel === "EOW";
 
   // LOGIC-ONLY flag. FMB150 *and* FMB120 hardware (other than EOW) use the MINI
@@ -1896,10 +1898,14 @@ export function GreenXHealthPanel({
     ? `${alarms.length} warning${alarms.length !== 1 ? "s" : ""}`
     : "Healthy";
 
-  // BRANDING — driven by the real model (isMini / isEOW), NOT useMiniLogic.
-  const productName = isEOW ? "GreenDrive Neo" : isMini ? "GreenDrive Mini" : "GreenX";
+  // BRANDING — follows the ASSET, never the tracker. A DG is a GreenX whether
+  // it reports through an FMC650, FMB150 or FMB120; only Engine on Wheels is a
+  // GreenDrive. This used to show "GreenDrive Mini" for any DG on FMB hardware,
+  // which labelled stationary gensets as vehicle units.
+  const productName = isEOW ? "GreenDrive Neo" : "GreenX";
   const unitLabel   = isEOW ? "Engine" : "DG set";
-  const modelBadge  = isEOW ? "Engine on Wheels" : isMini ? `Mini (${hwLabel})` : deviceModel;
+  // A MINI has no KVA rating to show, so the badge names the tracker instead.
+  const modelBadge  = isEOW ? "Engine on Wheels" : isMini ? hwLabel : deviceModel;
 
   const subline = isDataBlocked
     ? `Last seen: ${lastSeen ? formatTimeAgo(lastSeen) : "never"}`
@@ -1967,7 +1973,9 @@ export function GreenXHealthPanel({
               {modelBadge}
             </span>
           )}
-          {isMini && !isMobile && (
+          {/* The single-analog FMB signal set is still unconfirmed (divisor,
+              water input) — flag it as beta on that LOGIC, not on the brand. */}
+          {useMiniLogic && !isMobile && (
             <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 20, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", textTransform: "uppercase" as const, letterSpacing: 0.5 }}>
               Beta
             </span>

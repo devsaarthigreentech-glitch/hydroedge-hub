@@ -25,6 +25,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
     // Held in the form as VOLTS (what the user types); converted to raw
     // millivolts on submit, which is how devices.set_ain1_raw stores it.
     set_ain1_volts: device.set_ain1_raw != null ? String(device.set_ain1_raw / 1000) : "",
+    weekly_report: device.weekly_report || "auto",
     customer_id: device.customer_id || "",
     notes: device.notes || "",
     tested: device.tested || false,
@@ -103,6 +104,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
           set_ain1_raw: formData.set_ain1_volts === ""
             ? null
             : parseFloat((Number(formData.set_ain1_volts) * 1000).toFixed(2)),
+          weekly_report: formData.weekly_report,
           customer_id: formData.customer_id,
           notes: formData.notes,
           tested: formData.tested,
@@ -267,6 +269,37 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             onFocus={focusStyle}
             onBlur={blurStyle}
           />
+        </div>
+
+        {/* Weekly report — whether this device appears in the customer's Monday email */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>Weekly Report</label>
+          <select
+            value={formData.weekly_report}
+            onChange={(e) => setFormData({ ...formData, weekly_report: e.target.value as "auto" | "always" | "never" })}
+            style={{ ...inputStyle as React.CSSProperties, cursor: "pointer" }}
+            onFocus={focusStyle}
+            onBlur={blurStyle}
+          >
+            <option value="auto">Auto — include when operational</option>
+            <option value="always">Always include</option>
+            <option value="never">Never include</option>
+          </select>
+          <div style={{ fontSize: 11, color: THEME.text.tertiary, marginTop: 6, lineHeight: 1.5 }}>
+            {formData.weekly_report === "auto" && (
+              <>
+                Included when the device is <strong>active</strong>, <strong>commissioned</strong> (tested
+                or carrying a series name) and has <strong>reported within 30 days</strong>. Assigned but
+                uninstalled units are left out automatically.
+              </>
+            )}
+            {formData.weekly_report === "always" && (
+              <>Always listed in the weekly report, even with no data — shown as "no data received".</>
+            )}
+            {formData.weekly_report === "never" && (
+              <>Left out of the weekly report regardless of activity. Alerts are unaffected.</>
+            )}
+          </div>
         </div>
 
         {/* System Voltage — drives the external-power alarm threshold */}
