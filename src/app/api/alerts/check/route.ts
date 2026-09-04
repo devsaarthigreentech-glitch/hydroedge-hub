@@ -2701,17 +2701,16 @@ const IO_EXTERNAL_VOLTAGE = 66; // Teltonika AVL id — external supply, millivo
 // is another email that can arrive at 3am.
 const IMMEDIATE_ALERT_IDS = new Set(["external_power_low"]);
 
+// A digest that fails to send is retried, but only this many times in a day.
+// Without a ceiling a sustained SMTP outage retries every scan indefinitely.
+const MAX_DIGEST_ATTEMPTS_PER_DAY = 3;
+
 const istHourFmt = new Intl.DateTimeFormat("en-GB", {
   timeZone: REPORTING_TZ, hour: "2-digit", hourCycle: "h23",
 });
 
 function istHour(d: Date): number {
   return parseInt(istHourFmt.format(d), 10);
-}
-
-/** YYYY-MM-DD in reporting-local time, for "have we already sent today". */
-function istDateKey(d: Date): string {
-  return d.toLocaleDateString("en-CA", { timeZone: REPORTING_TZ });
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -3372,23 +3371,35 @@ export async function POST(request: NextRequest) {
     const now       = new Date();
     const digestWindowOpen = istHour(now) >= DIGEST_HOUR;
 
-    // Has this company already had its roundup today (reporting-local)? Only
-    // digest sends count — an urgent 3am power alert must not swallow the day's
-    // summary, which is why dispatch_kind exists.
-    async function digestAlreadySentToday(customerId: string): Promise<boolean> {
-      // email_status matters: a failed send is still logged, and counting it
-      // here would let one Gmail hiccup swallow the entire day's roundup with
-      // no retry until tomorrow. Only a delivered digest closes the gate.
+    // Has this company had its roundup today (reporting-local)?
+    //
+    // Retrying a failed send is right — one Gmail hiccup should not cost a
+    // customer the whole day. Retrying it FOREVER is not: an SMTP outage that
+    // lasted weeks turned this gate into a 5-minute loop that logged thousands
+    // of dead attempts. So a delivered digest closes the gate, and so does
+    // running out of attempts. Both count as settled for today.
+    async function digestSettledToday(
+      customerId: string
+    ): Promise<{ held: boolean; reason: string }> {
       const r = await client.query(`
-        SELECT MAX(nl.sent_at) AS last_sent
+        SELECT
+          COUNT(*) FILTER (WHERE nl.email_status = 'sent') AS delivered,
+          COUNT(DISTINCT date_trunc('minute', nl.sent_at)) AS attempts
         FROM notification_log nl
         JOIN devices d ON d.id = nl.device_id
         WHERE d.customer_id = $1
           AND nl.dispatch_kind = 'digest'
-          AND nl.email_status = 'sent'
-      `, [customerId]);
-      const last = r.rows[0]?.last_sent;
-      return !!last && istDateKey(new Date(last)) === istDateKey(now);
+          AND (nl.sent_at AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $2)::date
+      `, [customerId, REPORTING_TZ]);
+
+      const delivered = Number(r.rows[0]?.delivered || 0);
+      const attempts  = Number(r.rows[0]?.attempts  || 0);
+
+      if (delivered > 0) return { held: true, reason: "already delivered today" };
+      if (attempts >= MAX_DIGEST_ATTEMPTS_PER_DAY) {
+        return { held: true, reason: `${attempts} failed attempts today — retrying tomorrow` };
+      }
+      return { held: false, reason: "" };
     }
 
     async function dispatch(
@@ -3463,8 +3474,10 @@ export async function POST(request: NextRequest) {
 
       // Test mode shows what a roundup would contain regardless of the clock,
       // otherwise a dry run before 09:00 would look misleadingly empty.
-      const due = isTestMode
-        || (digestWindowOpen && !(await digestAlreadySentToday(customerId)));
+      const settled = digestWindowOpen
+        ? await digestSettledToday(customerId)
+        : { held: true, reason: `before ${DIGEST_HOUR}:00 ${REPORTING_TZ}` };
+      const due = isTestMode || !settled.held;
 
       if (due) {
         await dispatch(customerId, group, digest, "digest");
@@ -3475,7 +3488,7 @@ export async function POST(request: NextRequest) {
           customer:     group.customerName,
           customer_id:  customerId,
           alerts_held:  digest.length,
-          reason:       digestWindowOpen ? "already sent today" : `before ${DIGEST_HOUR}:00 ${REPORTING_TZ}`,
+          reason:       settled.reason,
         });
       }
     }

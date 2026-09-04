@@ -67,8 +67,29 @@ and the screen cannot quote different numbers for the same period.
 | Water shortage | `device_water_short_log` | Episodes overlapping the week and engine-on time spent short. |
 | Alerts | `notification_log` | Each distinct alert the scan raised, and how many times. |
 
-Plus a Mon–Sun strip of engine hours and starts per day, and fleet totals at the
-top. Units needing attention sort first.
+### Layout
+
+A dark green masthead carries the customer, the dates and a count of units
+needing attention, then a one-paragraph summary that names the unit most
+responsible for any shortfall, then fleet totals.
+
+How much each unit gets is the hierarchy:
+
+| Status | What it shows |
+| --- | --- |
+| Needs attention | Eight figures, a Mon–Sun bar chart of hours run, and the observations block written as plain sentences. |
+| Ran normally | Four figures. Nothing else — a unit that is fine does not need a chart, and giving it one buries the unit that is not. |
+| No data | One line saying when it was last heard from. |
+
+Units needing attention sort first. The only warm colour in the design marks a
+genuine shortfall — output current is coloured only when producing time is under
+half the run time, the same test that writes the matching sentence.
+
+Preview the exact HTML for a company without sending anything:
+
+```
+http://localhost:3000/api/reports/weekly?customer_id=<uuid>&format=html
+```
 
 ## Sending
 

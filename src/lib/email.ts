@@ -550,15 +550,36 @@ import nodemailer from "nodemailer";
 // Email transporter
 // ============================================================================
 
+// The relay is configurable because the standard mail ports are not reliably
+// reachable from this host. DigitalOcean blocks outbound 25, 465 and 587 —
+// Gmail, Brevo and SendGrid all time out at the TCP level — while 2525 is open.
+// That block has come and gone twice (Jun 22, then Aug 14 onward, three weeks
+// of silent failure), so hard-coding Gmail on 587 is not something to go back
+// to even if it starts working again.
+//
+// SMTP_* wins. The GMAIL_* names remain as fallbacks so an existing .env.local
+// keeps working untouched, and so Gmail stays available wherever it is usable.
+const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
+const SMTP_USER = process.env.SMTP_USER || process.env.GMAIL_USER || "";
+const SMTP_PASS = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || "";
+
+export const smtpConfigured = !!SMTP_USER && !!SMTP_PASS;
+
 const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER || "",
-    pass: process.env.GMAIL_APP_PASSWORD || "",
-  },
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  // 465 is implicit TLS. 587 and 2525 open in the clear and upgrade, so make
+  // the upgrade mandatory — credentials must never cross unencrypted.
+  secure: SMTP_PORT === 465,
+  requireTLS: SMTP_PORT !== 465,
+  auth: { user: SMTP_USER, pass: SMTP_PASS },
+  // Fail in seconds rather than hanging the whole scan when the port is blocked.
+  connectionTimeout: 15_000,
+  greetingTimeout: 15_000,
 });
 
-const FROM_ADDRESS = process.env.GMAIL_FROM || process.env.GMAIL_USER || "";
+const FROM_ADDRESS = process.env.SMTP_FROM || process.env.GMAIL_FROM || SMTP_USER;
 const FROM_NAME = "SGT Hydroedge Alerts";
 
 // Support team — always CC'd
@@ -607,8 +628,8 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
   ccTo: string[];
   error?: string;
 }> {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    return { success: false, sentTo: [], ccTo: [], error: "GMAIL_USER and GMAIL_APP_PASSWORD not configured" };
+  if (!smtpConfigured) {
+    return { success: false, sentTo: [], ccTo: [], error: "SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD) not configured" };
   }
 
   const toList = [...new Set(data.to.filter(Boolean))];
@@ -672,8 +693,8 @@ export async function sendHtmlEmail(data: HtmlEmailData): Promise<{
   ccTo: string[];
   error?: string;
 }> {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    return { success: false, sentTo: [], ccTo: [], error: "GMAIL_USER and GMAIL_APP_PASSWORD not configured" };
+  if (!smtpConfigured) {
+    return { success: false, sentTo: [], ccTo: [], error: "SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD) not configured" };
   }
 
   const toList = [...new Set(data.to.filter(Boolean))];
@@ -705,8 +726,8 @@ export async function sendHtmlEmail(data: HtmlEmailData): Promise<{
 // ============================================================================
 
 export async function sendTestEmail(to: string): Promise<{ success: boolean; error?: string }> {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    return { success: false, error: "GMAIL_USER and GMAIL_APP_PASSWORD not configured" };
+  if (!smtpConfigured) {
+    return { success: false, error: "SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD) not configured" };
   }
 
   try {

@@ -7,13 +7,26 @@
 //
 // Everything a stationary genset can tell us comes from a handful of signals:
 //   Din.1  (IO 1)   run status — the engine-on clock, start counter, run lengths
-//   Ain.1  (IO 9)   output current — "under load" hours, average and peak amps
+//   Ain.1  (IO 9)   output current — "producing output" hours, average and peak
 //   IO 66 / IO 67   external supply and tracker battery — supply health
 //   IO 21           GSM signal — connectivity
 //   gps_records     a DG should not move; a displacement is worth a line
 //   notification_log / device_water_short_log — what the alert scan found
 //
-// Email clients strip most CSS, so the layout is tables with inline styles.
+// ── Design ──────────────────────────────────────────────────────────────────
+// Restrained editorial layout: a dark green masthead, Georgia numerals against
+// a sans body, hairline rules instead of boxes, and colour used only to mark a
+// unit that needs attention. Deliberately NOT a dashboard of coloured cards —
+// this is read on a phone by someone who wants to know if anything is wrong.
+//
+// Information hierarchy is carried by how much each unit gets:
+//   attention → full detail: eight figures, the daily chart, and the notes
+//   healthy   → four figures and nothing else; it is fine, say so and move on
+//   no data   → one line explaining the silence
+//
+// Email clients strip most CSS, so the layout is tables with inline styles. The
+// one <style> block carries a mobile media query that Gmail and Apple Mail
+// honour and everything else ignores harmlessly.
 // ============================================================================
 
 import { DG_MOVED_KM } from "@/lib/dg-metrics";
@@ -125,16 +138,35 @@ export function fmtHours(hours: number | null | undefined): string {
   const m = total % 60;
   if (h === 0 && m === 0) return "0h";
   if (h === 0) return `${m}m`;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+  // Zero-pad the minutes so a column of these lines up: "46h 05m", not "46h 5m".
+  return m === 0 ? `${h}h` : `${h}h ${String(m).padStart(2, "0")}m`;
 }
 
-function fmtNum(v: number | null | undefined, unit: string, decimals = 1): string {
+/** Whole hours for prose — "412 hours". */
+function roundHours(h: number): string {
+  return Math.round(h).toLocaleString("en-IN");
+}
+
+/**
+ * Fleet totals to the hour: "412h".
+ *
+ * Minutes are meaningful for one unit ("71h 20m") and noise once nine units are
+ * summed — nobody acts on 25 minutes across a fleet, and the extra digits cost
+ * the row its scannability.
+ */
+function fmtHoursCoarse(h: number): string {
+  return `${Math.round(h).toLocaleString("en-IN")}h`;
+}
+
+function fmtVal(v: number | null | undefined, unit: string, dp = 1): string {
   if (v === null || v === undefined || !isFinite(v)) return "—";
-  return `${v.toFixed(decimals)} ${unit}`.trim();
+  return `${v.toFixed(dp)}${unit ? " " + unit : ""}`;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const DOW    = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"];
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function parts(isoDay: string): { y: number; m: number; d: number; dow: number } {
   const [y, m, d] = isoDay.split("-").map((x) => parseInt(x, 10));
@@ -148,12 +180,31 @@ export function dayLabel(isoDay: string): string {
   return `${DOW[p.dow]} ${p.d}`;
 }
 
-/** "25 Aug – 31 Aug 2026" (or "28 Dec 2025 – 3 Jan 2026" across a year). */
+/** Weekday only — the chart sits under a header that already carries the dates. */
+function weekdayLabel(isoDay: string): string {
+  return DOW[parts(isoDay).dow];
+}
+
+/**
+ * "24–30 Aug 2026" — compact enough to survive a subject line, which is where
+ * this is used. Widens only as far as the dates force it: a week spanning two
+ * months gives "28 Aug – 3 Sep 2026", and one spanning a year gives both years.
+ */
 export function fmtDateRange(startDay: string, endDay: string): string {
   const a = parts(startDay);
   const b = parts(endDay);
-  const left = a.y === b.y ? `${a.d} ${MONTHS[a.m - 1]}` : `${a.d} ${MONTHS[a.m - 1]} ${a.y}`;
-  return `${left} – ${b.d} ${MONTHS[b.m - 1]} ${b.y}`;
+  if (a.y === b.y && a.m === b.m) return `${a.d}–${b.d} ${MONTHS[b.m - 1]} ${b.y}`;
+  if (a.y === b.y) return `${a.d} ${MONTHS[a.m - 1]} – ${b.d} ${MONTHS[b.m - 1]} ${b.y}`;
+  return `${a.d} ${MONTHS[a.m - 1]} ${a.y} – ${b.d} ${MONTHS[b.m - 1]} ${b.y}`;
+}
+
+/** "24 – 30 August 2026", the longer form used in the masthead. */
+function fmtDateRangeLong(startDay: string, endDay: string): string {
+  const a = parts(startDay);
+  const b = parts(endDay);
+  if (a.y === b.y && a.m === b.m) return `${a.d} – ${b.d} ${MONTHS_LONG[b.m - 1]} ${b.y}`;
+  if (a.y === b.y) return `${a.d} ${MONTHS_LONG[a.m - 1]} – ${b.d} ${MONTHS_LONG[b.m - 1]} ${b.y}`;
+  return `${a.d} ${MONTHS_LONG[a.m - 1]} ${a.y} – ${b.d} ${MONTHS_LONG[b.m - 1]} ${b.y}`;
 }
 
 function fmtIst(iso: string | null): string {
@@ -161,6 +212,16 @@ function fmtIst(iso: string | null): string {
   return new Date(iso).toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false,
   });
+}
+
+/**
+ * "SGT-GX-0426-0027" → "GX‑0027" for use inside a sentence, with a non-breaking
+ * hyphen so the identifier never wraps mid-name. Anything not matching the
+ * series pattern is returned whole.
+ */
+function shortName(deviceName: string): string {
+  const m = /^SGT-(G[DXMI])-\d{4}-(\d+)$/.exec(deviceName.trim());
+  return m ? `${m[1]}&#8209;${m[2]}` : escapeHtml(deviceName);
 }
 
 // ─── Aggregates ──────────────────────────────────────────────────────────────
@@ -186,214 +247,344 @@ function brandWord(data: WeeklyReportData): string {
 }
 
 export function weeklyReportSubject(data: WeeklyReportData): string {
-  const s = fleetSummary(data);
-  const flag = s.needAttention > 0 ? "🟡" : s.reporting === 0 ? "⚪" : "🟢";
-  return `${flag} Weekly ${brandWord(data)} Report — ${data.customerName} — ${fmtDateRange(data.weekStart, data.weekEnd)}`;
+  return `Weekly ${brandWord(data)} report — ${data.customerName} — ${fmtDateRange(data.weekStart, data.weekEnd)}`;
 }
+
+// ─── Palette ─────────────────────────────────────────────────────────────────
+
+const C = {
+  masthead:    "#0f2620",
+  mastheadSub: "#8fada2",
+  rule:        "#3f8f6b",   // brand green — accent bar, healthy marker, chart bars
+  green:       "#3f8f6b",
+  greenText:   "#2f7a58",
+  attention:   "#b4531f",   // the only warm colour in the design
+  ink:         "#1b2422",
+  muted:       "#8b9591",
+  mutedDark:   "#78837f",
+  mutedLight:  "#98a29e",
+  faint:       "#c3ccc8",
+  hair:        "#eef1f0",   // lightest rule, between metric rows
+  hairMid:     "#eaeeec",
+  border:      "#e3e8e5",   // unit card border
+  borderDark:  "#cfd6d3",   // fleet stat rules, chart baseline
+  barEmpty:    "#dfe4e2",
+  white:       "#ffffff",
+};
+
+const SERIF = "Georgia,'Times New Roman',serif";
+const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
 
 // ─── Template pieces ─────────────────────────────────────────────────────────
 
-const C = {
-  headerBg: "#166534",
-  text: "#111827", muted: "#6b7280", faint: "#9ca3af",
-  border: "#e5e7eb", surface: "#f8fafc",
-  green: "#15803d", greenBg: "#f0fdf4", greenBorder: "#bbf7d0",
-  amber: "#b45309", amberBg: "#fffbeb", amberBorder: "#fde68a",
-  red: "#b91c1c", redBg: "#fef2f2", redBorder: "#fecaca",
-  gray: "#64748b", grayBg: "#f1f5f9", grayBorder: "#e2e8f0",
-  blue: "#1d4ed8", blueBg: "#eff6ff", blueBorder: "#bfdbfe",
-  orange: "#c2410c", orangeBg: "#fff7ed", orangeBorder: "#fed7aa",
-};
-
-function pill(text: string, fg: string, bg: string, border: string): string {
-  return `<span style="display:inline-block;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;background:${bg};color:${fg};border:1px solid ${border};white-space:nowrap;">${escapeHtml(text)}</span>`;
-}
-
-function statusPill(d: DeviceWeekly): string {
-  if (d.status === "no_data")   return pill("No data", C.gray, C.grayBg, C.grayBorder);
-  if (d.status === "attention") return pill("Needs attention", C.amber, C.amberBg, C.amberBorder);
-  return pill("Healthy", C.green, C.greenBg, C.greenBorder);
-}
-
-function brandPill(d: DeviceWeekly): string {
-  const isDrive = d.brand === "GreenDrive";
-  return pill(`${d.brand} · ${d.model}`,
-    isDrive ? C.orange : C.blue, isDrive ? C.orangeBg : C.blueBg, isDrive ? C.orangeBorder : C.blueBorder);
-}
-
-function tile(label: string, value: string, sub?: string): string {
+/** One figure: a serif number over a small caption. */
+function metric(value: string, caption: string, opts: { last?: boolean; first?: boolean; tone?: string; rule?: boolean } = {}): string {
+  const pad = opts.first ? "14px 12px 12px 0" : opts.last ? "14px 0 12px 12px" : "14px 12px 12px";
+  const border = opts.rule ? `border-bottom:1px solid ${C.hair};` : "";
   return `
-    <td width="25%" valign="top" style="padding:0 4px;">
-      <div style="background:${C.surface};border:1px solid ${C.border};border-radius:8px;padding:10px 12px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${C.muted};">${escapeHtml(label)}</div>
-        <div style="font-size:17px;font-weight:700;color:${C.text};margin-top:3px;white-space:nowrap;">${escapeHtml(value)}</div>
-        ${sub ? `<div style="font-size:11px;color:${C.faint};margin-top:2px;">${escapeHtml(sub)}</div>` : ""}
-      </div>
+    <td width="25%" style="padding:${pad};${border}">
+      <div style="font-family:${SERIF};font-size:19px;color:${opts.tone || C.ink};">${value}</div>
+      <div style="font-size:11px;color:${C.muted};margin-top:3px;">${escapeHtml(caption)}</div>
     </td>`;
 }
 
-function tileRow(cells: string[]): string {
-  return `<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 -4px 8px;"><tr>${cells.join("")}</tr></table>`;
-}
-
-function dailyStrip(d: DeviceWeekly): string {
+/**
+ * Hours run each day.
+ *
+ * Bars are plain divs with a pixel height — no images, no SVG, because both are
+ * blocked or broken in enough mail clients to make a chart that silently
+ * disappears. A day with no running gets a 2px stub rather than nothing, so the
+ * gap reads as "we have data, it did not run" instead of a rendering fault.
+ */
+function dailyChart(d: DeviceWeekly): string {
   const max = Math.max(...d.daily.map((x) => x.engineOnHours), 0.001);
-  const head = d.daily.map((x) =>
-    `<th style="font-size:10px;font-weight:700;color:${C.muted};padding:6px 2px;border-bottom:1px solid ${C.border};text-align:center;">${escapeHtml(x.label)}</th>`
-  ).join("");
-  const body = d.daily.map((x) => {
-    // Shade the cell by how busy the day was; a day with no running stays plain.
-    const ratio = x.engineOnHours / max;
-    const bg = x.engineOnHours <= 0 ? "#ffffff" : ratio > 0.66 ? "#dcfce7" : ratio > 0.33 ? "#ecfdf5" : "#f7fef9";
-    const starts = x.starts > 0 ? `${x.starts} start${x.starts === 1 ? "" : "s"}` : "—";
-    return `<td style="text-align:center;padding:8px 2px;background:${bg};border-bottom:1px solid ${C.border};">
-      <div style="font-size:13px;font-weight:700;color:${x.engineOnHours > 0 ? C.text : C.faint};">${escapeHtml(fmtHours(x.engineOnHours))}</div>
-      <div style="font-size:10px;color:${C.faint};margin-top:2px;">${escapeHtml(starts)}</div>
-    </td>`;
+  const bars = d.daily.map((x, i) => {
+    const on = x.engineOnHours > 0;
+    const h = on ? Math.max(3, Math.round((x.engineOnHours / max) * 40)) : 2;
+    const first = i === 0 ? ` height="46"` : "";
+    return `<td width="14.28%" valign="bottom"${first} style="padding:0 4px;"><div style="height:${h}px;background:${on ? C.green : C.barEmpty};"></div></td>`;
   }).join("");
+  const labels = d.daily.map((x) => {
+    const on = x.engineOnHours > 0;
+    const val = on ? x.engineOnHours.toFixed(1) : "—";
+    return `<td align="center" style="padding:7px 0 0;font-size:11px;color:${C.muted};">${weekdayLabel(x.day)}<br><span style="font-family:${SERIF};font-size:13px;color:${on ? C.ink : C.faint};">${val}</span></td>`;
+  }).join("");
+
   return `
-    <div style="font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${C.muted};margin:14px 0 6px;">Engine-on time by day</div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${C.border};border-radius:8px;">
-      <tr>${head}</tr><tr>${body}</tr>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+      <tr><td colspan="7" style="font-size:11px;color:${C.muted};padding-bottom:10px;">Hours run each day</td></tr>
+      <tr>${bars}</tr>
+      <tr style="border-top:1px solid ${C.borderDark};">${labels}</tr>
     </table>`;
 }
 
-function noteLine(icon: string, text: string, fg: string, bg: string, border: string): string {
-  return `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:9px 12px;margin:8px 0 0;font-size:12px;color:${fg};">${icon} ${escapeHtml(text)}</div>`;
-}
-
-function alertsBlock(d: DeviceWeekly): string {
-  if (d.alerts.length === 0) return "";
-  const items = d.alerts.slice(0, 6).map((a) => {
-    const crit = a.severity === "critical";
-    return `<div style="background:${crit ? C.redBg : C.amberBg};border:1px solid ${crit ? C.redBorder : C.amberBorder};border-radius:8px;padding:9px 12px;margin-bottom:6px;">
-      <span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase;background:${crit ? "#dc2626" : "#d97706"};color:#fff;">${a.severity}</span>
-      <span style="font-size:12px;font-weight:600;color:${crit ? C.red : C.amber};margin-left:6px;">${escapeHtml(a.message)}</span>
-      <span style="font-size:11px;color:${C.faint};margin-left:6px;">· raised ${a.count}×</span>
-    </div>`;
-  }).join("");
-  const more = d.alerts.length > 6 ? `<div style="font-size:11px;color:${C.faint};">+ ${d.alerts.length - 6} more</div>` : "";
-  return `
-    <div style="font-size:10px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:${C.muted};margin:14px 0 6px;">Alerts raised this week</div>
-    ${items}${more}`;
-}
-
-function deviceCard(d: DeviceWeekly): string {
+/**
+ * The observations block — plain sentences, not alert chips.
+ *
+ * Everything worth saying about a unit is a sentence a site engineer can act on,
+ * so it is written as one. The left rule is the only decoration.
+ */
+function observations(d: DeviceWeekly): string {
   const isDrive = d.brand === "GreenDrive";
   const unit = isDrive ? "Engine" : "DG";
+  const lines: string[] = [];
 
-  const notes: string[] = [];
   if (d.status === "no_data") {
-    notes.push(noteLine("⚪", `No data received this week. Last seen ${fmtIst(d.lastSeenAt)} IST.`, C.gray, C.grayBg, C.grayBorder));
+    lines.push(`No data received this week. Last seen ${escapeHtml(fmtIst(d.lastSeenAt))} IST — worth checking the SIM and the tracker's power feed.`);
   } else {
-    if (d.dataAvailabilityPct < 50) {
-      notes.push(noteLine("📡", `Reported in only ${d.dataAvailabilityPct}% of hours this week — figures may be under-counted. Last seen ${fmtIst(d.lastSeenAt)} IST.`, C.amber, C.amberBg, C.amberBorder));
-    }
     if (d.engineOnHours > 0 && d.loadHours < d.engineOnHours * 0.5) {
-      notes.push(noteLine("⚠️", `${unit} ran ${fmtHours(d.engineOnHours)} but produced output for only ${fmtHours(d.loadHours)} — check the electrolyser while running.`, C.amber, C.amberBg, C.amberBorder));
+      lines.push(`Ran ${fmtHours(d.engineOnHours)} but produced output for only ${fmtHours(d.loadHours)}. Worth checking the electrolyser while the engine is running.`);
     }
     if (d.waterEpisodes > 0) {
-      notes.push(noteLine("💧", `Water shortage detected ${d.waterEpisodes} time${d.waterEpisodes === 1 ? "" : "s"} (${fmtHours(d.waterShortHours)} of engine-on time). Keep the tanks topped up.`, C.amber, C.amberBg, C.amberBorder));
+      lines.push(`Water ran short ${d.waterEpisodes === 1 ? "once" : d.waterEpisodes === 2 ? "twice" : `${d.waterEpisodes} times`}, across ${fmtHours(d.waterShortHours)} of running time.`);
     }
-    // Threshold shared with the Analytics tab — see DG_MOVED_KM for why it is
-    // set well clear of GNSS wander rather than at "has it shifted at all".
     if (!isDrive && d.displacementKm !== null && d.displacementKm > DG_MOVED_KM) {
-      notes.push(noteLine("📍", `Position moved about ${d.displacementKm.toFixed(1)} km during the week, past the ${DG_MOVED_KM} km limit. A stationary DG should not move — please confirm it was relocated.`, C.red, C.redBg, C.redBorder));
+      lines.push(`Position moved about ${d.displacementKm.toFixed(1)} km, past the ${DG_MOVED_KM} km limit. A stationary set should not move — please confirm it was relocated.`);
     }
     if (d.setAmps !== null && d.avgAmps !== null && Math.abs(d.avgAmps - d.setAmps) > d.setAmps * 0.1) {
-      notes.push(noteLine("⚡", `Average output ${d.avgAmps.toFixed(1)} A is outside ±10% of the ${d.setAmps.toFixed(1)} A setpoint.`, C.amber, C.amberBg, C.amberBorder));
+      lines.push(`Average output ${d.avgAmps.toFixed(1)} A against a ${d.setAmps.toFixed(1)} A setpoint — outside the ±10% band.`);
+    }
+    if (d.dataAvailabilityPct < 50) {
+      lines.push(`${unit} reported in only ${d.dataAvailabilityPct}% of the week's hours, so the figures above are a floor rather than a total.`);
     }
   }
 
-  const numbers = d.status === "no_data" ? "" : `
-    ${tileRow([
-      tile("Engine-on time", fmtHours(d.engineOnHours), "Din.1 = ON"),
-      tile("Under load", fmtHours(d.loadHours), "output > 2 A"),
-      tile("Starts", String(d.starts), d.starts > 0 ? `longest run ${fmtHours(d.longestRunHours)}` : undefined),
-      tile("Avg output", fmtNum(d.avgAmps, "A"), d.peakAmps !== null ? `peak ${d.peakAmps.toFixed(1)} A` : undefined),
-    ])}
-    ${tileRow([
-      tile("Supply voltage", fmtNum(d.supplyMinV, "V"), d.supplyAvgV !== null ? `min · avg ${d.supplyAvgV.toFixed(1)} V` : "min"),
-      tile("Tracker battery", fmtNum(d.batteryMinV, "V", 2), "min"),
-      tile("GSM signal", fmtNum(d.gsmAvgPct, "%", 0), "average"),
-      tile("Data availability", `${d.dataAvailabilityPct}%`, `${d.hoursWithData} of 168 h`),
-    ])}
-    ${dailyStrip(d)}`;
+  // Alerts the scan actually raised, kept as a short list under the prose so the
+  // narrative stays readable and the record is still there.
+  const alertLines = d.alerts.slice(0, 6).map((a) =>
+    `<div style="font-size:12px;line-height:1.6;color:${C.ink};margin-top:5px;">${escapeHtml(a.message)}<span style="color:${C.muted};"> — ${a.severity}, ${a.count} time${a.count === 1 ? "" : "s"}</span></div>`
+  ).join("");
+  const more = d.alerts.length > 6
+    ? `<div style="font-size:12px;color:${C.muted};margin-top:5px;">and ${d.alerts.length - 6} more</div>` : "";
+
+  if (lines.length === 0 && d.alerts.length === 0) return "";
+
+  const prose = lines.map((l, i) =>
+    `<p style="font-size:13px;line-height:1.6;color:${C.ink};margin:0${i === lines.length - 1 && !alertLines ? "" : " 0 9px"};">${l}</p>`
+  ).join("");
+
+  const alertsBlock = alertLines
+    ? `<div style="margin-top:${lines.length ? 12 : 0}px;">
+         <div style="font-size:11px;color:${C.muted};">Alerts raised this week</div>${alertLines}${more}
+       </div>`
+    : "";
+
+  const tone = d.status === "no_data" ? C.muted : C.attention;
 
   return `
-    <div style="border:1px solid ${C.border};border-radius:10px;overflow:hidden;margin-bottom:20px;">
-      <div style="background:${C.surface};padding:12px 16px;border-bottom:1px solid ${C.border};">
-        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td valign="top">
-            <div style="font-size:14px;font-weight:700;color:${C.text};">${escapeHtml(d.deviceName)}</div>
-            <div style="font-size:11px;color:${C.muted};margin-top:2px;font-family:monospace;">${escapeHtml(d.imei)} · ${escapeHtml(d.hardware)}</div>
-          </td>
-          <td valign="top" align="right" style="white-space:nowrap;">
-            ${brandPill(d)} ${statusPill(d)}
-          </td>
-        </tr></table>
-      </div>
-      <div style="padding:14px 16px;">
-        ${numbers}
-        ${notes.join("")}
-        ${alertsBlock(d)}
-      </div>
-    </div>`;
+    <tr>
+      <td colspan="2" style="padding:22px 20px 20px;">
+        <div style="border-left:2px solid ${tone};padding:2px 0 2px 14px;">
+          ${prose}${alertsBlock}
+        </div>
+      </td>
+    </tr>`;
+}
+
+/**
+ * "GreenX 380KVA · FMC650 · 862123049871234"
+ *
+ * When no KVA rating is known the route falls back to naming the tracker as the
+ * model, which would print "GreenX FMB120 · FMB120". Collapse the repeat rather
+ * than shipping a line that looks like a bug to the customer.
+ */
+function unitMeta(d: DeviceWeekly): string {
+  const model = d.model === d.hardware ? "" : ` ${d.model}`;
+  return `${d.brand}${model} · ${d.hardware} · ${d.imei}`;
+}
+
+function unitCard(d: DeviceWeekly): string {
+  const accent =
+    d.status === "attention" ? C.attention :
+    d.status === "no_data"   ? C.muted : C.green;
+  const statusText =
+    d.status === "attention" ? "Needs attention" :
+    d.status === "no_data"   ? "No data" : "Ran normally";
+  const statusColor =
+    d.status === "attention" ? C.attention :
+    d.status === "no_data"   ? C.muted : C.greenText;
+
+  // Healthy units get four figures and nothing more. A unit that is fine does
+  // not need a chart, and giving it one buries the unit that is not.
+  const detailed = d.status === "attention";
+
+  // Colour the output figure only when it is genuinely short of the run time —
+  // the same test that writes the "ran X but produced Y" line below. Keying it
+  // to "is this a detailed card" instead marked healthy output on a unit
+  // flagged for something else entirely, which is how a reader learns to
+  // distrust the colour.
+  const outputShort = d.engineOnHours > 0 && d.loadHours < d.engineOnHours * 0.5;
+
+  const rowOne = `
+    <tr>
+      ${metric(fmtHours(d.engineOnHours), "Engine-on", { first: true, rule: detailed })}
+      ${metric(fmtHours(d.loadHours), "Producing output", { rule: detailed, tone: outputShort ? C.attention : C.ink })}
+      ${metric(String(d.starts), d.starts > 0 ? `Starts, longest ${fmtHours(d.longestRunHours)}` : "Starts", { rule: detailed })}
+      ${metric(fmtVal(d.avgAmps, "A"), d.peakAmps !== null ? `Average, peak ${d.peakAmps.toFixed(1)} A` : "Average output", { last: true, rule: detailed })}
+    </tr>`;
+
+  const rowTwo = detailed ? `
+    <tr>
+      ${metric(fmtVal(d.supplyMinV, "V"), "Lowest supply", { first: true })}
+      ${metric(fmtVal(d.batteryMinV, "V", 2), "Tracker battery")}
+      ${metric(fmtVal(d.gsmAvgPct, "%", 0), "GSM signal")}
+      ${metric(`${d.dataAvailabilityPct}%`, `${d.hoursWithData} of 168 hours`, { last: true })}
+    </tr>` : "";
+
+  const figures = d.status === "no_data" ? "" : `
+    <tr>
+      <td colspan="2" style="padding:0 20px${detailed ? "" : " 20px"};">
+        <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+          ${rowOne}${rowTwo}
+        </table>
+      </td>
+    </tr>`;
+
+  const chart = detailed ? `
+    <tr>
+      <td colspan="2" style="padding:8px 20px 0;">${dailyChart(d)}</td>
+    </tr>` : "";
+
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid ${C.border};margin-bottom:20px;">
+      <tr>
+        <td width="3" style="background:${accent};"></td>
+        <td style="padding:0;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <tr>
+              <td style="padding:16px 20px 13px;">
+                <div style="font-family:${SERIF};font-size:18px;color:${C.ink};">${escapeHtml(d.deviceName)}</div>
+                <div style="font-size:11px;color:${C.muted};margin-top:4px;">${escapeHtml(unitMeta(d))}</div>
+              </td>
+              <td align="right" valign="top" style="padding:19px 20px 13px;font-size:12px;color:${statusColor};white-space:nowrap;">${statusText}</td>
+            </tr>
+            <tr><td colspan="2" style="padding:0 20px;"><div style="border-top:1px solid ${C.ink};"></div></td></tr>
+            ${figures}${chart}${observations(d)}
+          </table>
+        </td>
+      </tr>
+    </table>`;
+}
+
+/**
+ * The opening paragraph.
+ *
+ * Deliberately a sentence about this week rather than a restatement of the
+ * numbers below it: totals, then the one unit most responsible for the
+ * shortfall, named. Someone who reads only this line should still know whether
+ * to do anything.
+ */
+function narrative(data: WeeklyReportData, s: FleetSummary): string {
+  if (s.reporting === 0) {
+    return `None of your units sent data this week, so there is nothing to report on. That is itself worth looking into — the section below lists when each was last heard from.`;
+  }
+
+  const opening = `Your fleet ran ${roundHours(s.engineOnHours)} hours this week and produced output for ${roundHours(s.loadHours)} of them.`;
+
+  if (s.needAttention === 0) {
+    return `${opening} Every unit ran normally and nothing needs your attention.`;
+  }
+
+  // The unit with the largest gap between running and producing — the biggest
+  // single contributor to the shortfall the opening sentence just quoted.
+  const worst = data.devices
+    .filter((d) => d.status === "attention")
+    .sort((a, b) => (b.engineOnHours - b.loadHours) - (a.engineOnHours - a.loadHours))[0];
+
+  if (!worst) {
+    return `${opening} ${s.needAttention} unit${s.needAttention === 1 ? "" : "s"} need${s.needAttention === 1 ? "s" : ""} attention — details below.`;
+  }
+
+  const moved = worst.brand !== "GreenDrive" && worst.displacementKm !== null && worst.displacementKm > DG_MOVED_KM;
+  const gap = worst.engineOnHours - worst.loadHours;
+  const blames = gap > 0 && s.engineOnHours - s.loadHours > 0 && gap >= (s.engineOnHours - s.loadHours) * 0.4;
+
+  let second: string;
+  if (blames && moved) {
+    second = `${shortName(worst.deviceName)} accounts for most of the shortfall, and it has also moved position.`;
+  } else if (blames) {
+    second = `${shortName(worst.deviceName)} accounts for most of the shortfall.`;
+  } else if (moved) {
+    second = `${shortName(worst.deviceName)} has moved position, and ${s.needAttention === 1 ? "is the only unit" : `${s.needAttention} units`} needing attention this week.`;
+  } else {
+    second = `${s.needAttention} unit${s.needAttention === 1 ? "" : "s"} need${s.needAttention === 1 ? "s" : ""} a look, starting with ${shortName(worst.deviceName)}.`;
+  }
+
+  return `${opening} ${second}`;
 }
 
 // ─── Whole email ─────────────────────────────────────────────────────────────
 
 export function buildWeeklyReportHtml(data: WeeklyReportData): string {
   const s = fleetSummary(data);
-  const range = fmtDateRange(data.weekStart, data.weekEnd);
-  const brand = brandWord(data);
 
-  const intro = s.reporting === 0
-    ? `None of your ${brand} units sent data this week.`
-    : s.needAttention > 0
-    ? `${s.needAttention} of your ${s.units} ${brand} unit${s.units === 1 ? "" : "s"} need${s.needAttention === 1 ? "s" : ""} attention this week. Details are below.`
-    : `All ${s.units} of your ${brand} unit${s.units === 1 ? "" : "s"} ran normally this week.`;
-
+  // Problems first, then healthy, then silent — so the top of the email is the
+  // part that needs doing something about.
   const cards = [...data.devices]
-    // Problems first, then by name — so the top of the email is the part that matters.
     .sort((a, b) => {
-      const rank = (d: DeviceWeekly) => d.status === "attention" ? 0 : d.status === "no_data" ? 2 : 1;
+      const rank = (d: DeviceWeekly) => d.status === "attention" ? 0 : d.status === "healthy" ? 1 : 2;
       return rank(a) - rank(b) || a.deviceName.localeCompare(b.deviceName);
     })
-    .map(deviceCard)
+    .map(unitCard)
     .join("");
 
-  return `
-<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;margin:0 auto;background:#ffffff;">
+  return `<style>
+  @media (max-width:560px) {
+    td[width="25%"] { display:block; width:100% !important; border-right:none !important; }
+  }
+</style>
+<div style="font-family:${SANS};max-width:640px;margin:0 auto;background:${C.white};">
 
-  <div style="background:${C.headerBg};padding:24px 28px;border-radius:12px 12px 0 0;">
-    <h1 style="color:#ffffff;margin:0;font-size:20px;font-weight:700;">📊 Weekly ${escapeHtml(brand)} Report</h1>
-    <p style="color:rgba(255,255,255,0.9);margin:6px 0 0;font-size:13px;">
-      ${escapeHtml(data.customerName)} · ${escapeHtml(range)}${data.partial ? " · week in progress" : ""}
-    </p>
-  </div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:${C.masthead};">
+    <tr>
+      <td style="padding:28px 30px 24px;">
+        <div style="font-family:${SERIF};font-size:23px;color:${C.white};letter-spacing:-.2px;">Weekly unit report</div>
+        <div style="font-size:12px;color:${C.mastheadSub};margin-top:7px;">${escapeHtml(data.customerName)} · ${escapeHtml(fmtDateRangeLong(data.weekStart, data.weekEnd))}${data.partial ? " · week in progress" : ""}</div>
+      </td>
+      <td align="right" valign="top" style="padding:28px 30px 24px;">
+        <div style="font-family:${SERIF};font-size:30px;color:${C.white};line-height:1;">${s.needAttention}</div>
+        <div style="font-size:11px;color:${C.mastheadSub};margin-top:6px;">of ${s.units} need attention</div>
+      </td>
+    </tr>
+  </table>
+  <div style="height:3px;background:${C.rule};"></div>
 
-  <div style="padding:24px 28px;border:1px solid ${C.border};border-top:none;border-radius:0 0 12px 12px;">
+  <div style="padding:30px;">
 
-    <p style="font-size:14px;color:${C.text};margin:0 0 12px;line-height:1.5;">Hi ${escapeHtml(data.contactName || data.customerName)},</p>
-    <p style="font-size:13px;color:#4b5563;margin:0 0 20px;line-height:1.5;">${escapeHtml(intro)} All times are IST.</p>
+    <p style="font-size:15px;line-height:1.65;color:${C.ink};margin:0 0 10px;">Dear ${escapeHtml(data.contactName || data.customerName)},</p>
+    <p style="font-size:15px;line-height:1.65;color:${C.ink};margin:0 0 28px;max-width:56ch;">${narrative(data, s)}</p>
 
-    ${tileRow([
-      tile("Engine-on time", fmtHours(s.engineOnHours), `across ${s.units} unit${s.units === 1 ? "" : "s"}`),
-      tile("Under load", fmtHours(s.loadHours), "output > 2 A"),
-      tile("Starts", String(s.starts), "this week"),
-      tile("Alerts", String(s.alertLines), s.needAttention > 0 ? `${s.needAttention} unit${s.needAttention === 1 ? "" : "s"} flagged` : "none"),
-    ])}
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-top:1px solid ${C.borderDark};border-bottom:1px solid ${C.borderDark};">
+      <tr>
+        <td width="25%" style="padding:17px 14px 15px 0;border-right:1px solid ${C.hairMid};">
+          <div style="font-family:${SERIF};font-size:25px;color:${C.ink};">${fmtHoursCoarse(s.engineOnHours)}</div>
+          <div style="font-size:11px;color:${C.mutedDark};margin-top:5px;">Engine-on time</div>
+        </td>
+        <td width="25%" style="padding:17px 14px 15px;border-right:1px solid ${C.hairMid};">
+          <div style="font-family:${SERIF};font-size:25px;color:${C.ink};">${fmtHoursCoarse(s.loadHours)}</div>
+          <div style="font-size:11px;color:${C.mutedDark};margin-top:5px;">Producing output</div>
+        </td>
+        <td width="25%" style="padding:17px 14px 15px;border-right:1px solid ${C.hairMid};">
+          <div style="font-family:${SERIF};font-size:25px;color:${C.ink};">${s.starts}</div>
+          <div style="font-size:11px;color:${C.mutedDark};margin-top:5px;">Starts</div>
+        </td>
+        <td width="25%" style="padding:17px 0 15px 14px;">
+          <div style="font-family:${SERIF};font-size:25px;color:${s.alertLines > 0 ? C.attention : C.ink};">${s.alertLines}</div>
+          <div style="font-size:11px;color:${C.mutedDark};margin-top:5px;">Alerts raised</div>
+        </td>
+      </tr>
+    </table>
 
-    <div style="height:12px;"></div>
+    <div style="height:32px;"></div>
 
     ${cards}
 
-    <div style="margin-top:24px;padding-top:16px;border-top:1px solid ${C.border};">
-      <p style="font-size:11px;color:${C.faint};margin:0;line-height:1.6;">
-        This report covers units that are commissioned and reporting; units not yet installed are not listed.
-        Engine-on time is measured from the run-status input (Din.1). "Under load" is time with output current above 2 A.
-        Generated ${escapeHtml(fmtIst(data.generatedAt))} IST by SGT Hydroedge monitoring. Reply to this email to reach support.
+    <div style="border-top:1px solid ${C.border};margin-top:28px;padding-top:15px;">
+      <p style="font-size:11px;line-height:1.7;color:${C.mutedLight};margin:0;">
+        Covers commissioned units that are reporting; units not yet installed are not listed.
+        Engine-on time is measured from the run-status input. Producing output means current above 2 A.
+        All times IST. Generated ${escapeHtml(fmtIst(data.generatedAt))} by SGT Hydroedge monitoring.
+        Reply to this email to reach support.
       </p>
     </div>
   </div>
