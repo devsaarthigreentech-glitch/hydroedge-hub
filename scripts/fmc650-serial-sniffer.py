@@ -16,6 +16,11 @@ every N seconds (Codec 12, type 0x05) so the sensor answers without ModScan32
 on the bus. Leave it off while ModScan32 is still wired in parallel — two
 masters on one RS-485 bus collide.
 
+While it runs, type a line starting with "!" to send a normal GPRS text
+command to every connected unit (e.g. "!getver", "!setparam 2005:5027"); the
+unit's text reply is printed. That is how you point the unit back at the
+production ingest when the test is over.
+
 Nothing is written to any database. Output goes to stdout and serial-sniffer.log.
 """
 import argparse
@@ -25,6 +30,7 @@ import struct
 import sys
 
 LOG = open("serial-sniffer.log", "a", buffering=1)
+CLIENTS: dict[str, asyncio.StreamWriter] = {}     # imei -> writer
 
 
 def log(msg: str) -> None:
@@ -94,7 +100,7 @@ def build_codec12(payload: bytes, cmd_type: int = 0x05) -> bytes:
     """Server -> device Codec 12. In TCP Binary mode the FMC650 writes the
     payload straight to RS-485."""
     core = bytes([0x0C, 0x01, cmd_type]) + struct.pack(">I", len(payload)) + payload + b"\x01"
-    return b"\x00\x00\x00\x00" + struct.pack(">I", len(core)) + core + struct.pack(">H", teltonika_crc(core))
+    return b"\x00\x00\x00\x00" + struct.pack(">I", len(core)) + core + struct.pack(">I", teltonika_crc(core))  # CRC-16 travels in a 4-byte field
 
 
 def build_modbus_read(slave: int, fc: int, start: int, count: int) -> bytes:
@@ -113,7 +119,10 @@ def handle_serial_packet(core: bytes, imei: str) -> None:
         when = f" device_ts={dt.datetime.fromtimestamp(ts, dt.timezone.utc).isoformat()}"
         data = data[4:]
     log(f"[{imei}] codec=0x{codec:02X} type=0x{cmd_type:02X}{when} len={len(data)} hex={data.hex(' ')}")
-    log(f"[{imei}]   {describe_modbus(data)}")
+    if data and all(32 <= b < 127 or b in (9, 10, 13) for b in data):
+        log(f"[{imei}]   TEXT: {data.decode('ascii').strip()}")
+    else:
+        log(f"[{imei}]   {describe_modbus(data)}")
 
 
 # ── Connection handler ────────────────────────────────────────────────────────
@@ -144,6 +153,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, arg
         writer.write(b"\x01")
         await writer.drain()
         log(f"[{imei}] connected from {peer}")
+        CLIENTS[imei] = writer
 
         if args.poll:
             poll_task = asyncio.create_task(poller(writer, imei, args))
@@ -155,7 +165,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, arg
                 return
             length = struct.unpack(">I", await read_exact(reader, 4))[0]
             core = await read_exact(reader, length)
-            crc = struct.unpack(">H", await read_exact(reader, 2))[0]
+            crc = struct.unpack(">I", await read_exact(reader, 4))[0]   # 4-byte CRC field
             if teltonika_crc(core) != crc:
                 log(f"[{imei}] CRC mismatch on codec 0x{core[0]:02X} packet — ignoring")
                 continue
@@ -177,7 +187,29 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, arg
     finally:
         if poll_task:
             poll_task.cancel()
+        CLIENTS.pop(imei, None)
         writer.close()
+
+
+async def console() -> None:
+    """Lines typed as "!<gprs command>" go to every connected unit as a
+    Codec 12 text command — the same thing the GreenVis Commands tab sends."""
+    while True:
+        line = await asyncio.to_thread(sys.stdin.readline)
+        if not line:                       # stdin closed (nohup / no tty)
+            return
+        line = line.strip()
+        if not line.startswith("!"):
+            continue
+        cmd = line[1:].strip()
+        if not CLIENTS:
+            log(f"console: no unit connected, not sending '{cmd}'")
+            continue
+        pkt = build_codec12(cmd.encode("ascii"))
+        for imei, w in list(CLIENTS.items()):
+            w.write(pkt)
+            await w.drain()
+            log(f"[{imei}] -> gprs command sent: {cmd}")
 
 
 async def main() -> None:
@@ -194,6 +226,7 @@ async def main() -> None:
 
     server = await asyncio.start_server(lambda r, w: handle(r, w, args), args.host, args.port)
     log(f"listening on {args.host}:{args.port}  poll={'off' if not args.poll else f'{args.poll}s'}")
+    asyncio.create_task(console())
     async with server:
         await server.serve_forever()
 
