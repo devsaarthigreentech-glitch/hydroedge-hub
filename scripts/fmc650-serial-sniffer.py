@@ -134,14 +134,20 @@ async def read_exact(reader: asyncio.StreamReader, n: int) -> bytes:
 
 
 async def poller(writer: asyncio.StreamWriter, imei: str, args) -> None:
-    frame = build_modbus_read(args.slave, args.fc, args.start, args.count)
-    pkt = build_codec12(frame, args.cmd_type)
-    log(f"[{imei}] poller armed: every {args.poll}s sending RTU {frame.hex(' ')} as codec12 type 0x{args.cmd_type:02X}")
+    # --scan A-B walks slave ids A..B one per poll (the HMI's station number is
+    # unknown); otherwise every poll goes to --slave.
+    ids = list(range(args.scan[0], args.scan[1] + 1)) if args.scan else [args.slave]
+    log(f"[{imei}] poller armed: every {args.poll}s, fc=0x{args.fc:02X} start={args.start} count={args.count} "
+        f"codec12 type 0x{args.cmd_type:02X}, slave ids {ids[0]}..{ids[-1]}")
+    i = 0
     while True:
         await asyncio.sleep(args.poll)
-        writer.write(pkt)
+        slave = ids[i % len(ids)]
+        i += 1
+        frame = build_modbus_read(slave, args.fc, args.start, args.count)
+        writer.write(build_codec12(frame, args.cmd_type))
         await writer.drain()
-        log(f"[{imei}] -> poll sent ({len(pkt)} bytes codec12)")
+        log(f"[{imei}] -> poll slave={slave} rtu={frame.hex(' ')}")
 
 
 async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, args) -> None:
@@ -221,6 +227,8 @@ async def main() -> None:
     p.add_argument("--port", type=int, default=5027)
     p.add_argument("--poll", type=float, default=0, help="seconds between Modbus polls (0 = listen only)")
     p.add_argument("--slave", type=int, default=1)
+    p.add_argument("--scan", type=lambda s: tuple(int(x) for x in s.split("-")), default=None,
+                   metavar="A-B", help="walk slave ids A..B, one per poll, instead of --slave")
     p.add_argument("--fc", type=lambda s: int(s, 0), default=0x03, help="0x03 holding / 0x04 input")
     p.add_argument("--start", type=int, default=0)
     p.add_argument("--count", type=int, default=14)
