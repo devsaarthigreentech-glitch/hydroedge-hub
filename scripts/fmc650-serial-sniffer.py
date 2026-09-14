@@ -187,7 +187,8 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, arg
     finally:
         if poll_task:
             poll_task.cancel()
-        CLIENTS.pop(imei, None)
+        if CLIENTS.get(imei) is writer:     # a newer socket may already have replaced us
+            del CLIENTS[imei]
         writer.close()
 
 
