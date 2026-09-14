@@ -12,8 +12,10 @@ like one.
     python scripts/fmc650-serial-sniffer.py --port 5027 --poll 10 --slave 1 --start 0 --count 14
 
 --poll N sends a Modbus "read holding registers" request down to the FMC650
-every N seconds (Codec 12, type 0x05) so the sensor answers without ModScan32
-on the bus. Leave it off while ModScan32 is still wired in parallel — two
+every N seconds (Codec 12, type --cmd-type) so the sensor answers without
+ModScan32 on the bus. Which type the unit forwards to the port is in the wiki
+table "behavior when it receives different CMD ID (Type) values"; try 5, then
+the unit's configured Command ID (6). Leave it off while ModScan32 is still wired in parallel — two
 masters on one RS-485 bus collide.
 
 While it runs, type a line starting with "!" to send a normal GPRS text
@@ -133,8 +135,8 @@ async def read_exact(reader: asyncio.StreamReader, n: int) -> bytes:
 
 async def poller(writer: asyncio.StreamWriter, imei: str, args) -> None:
     frame = build_modbus_read(args.slave, args.fc, args.start, args.count)
-    pkt = build_codec12(frame)
-    log(f"[{imei}] poller armed: every {args.poll}s sending RTU {frame.hex(' ')}")
+    pkt = build_codec12(frame, args.cmd_type)
+    log(f"[{imei}] poller armed: every {args.poll}s sending RTU {frame.hex(' ')} as codec12 type 0x{args.cmd_type:02X}")
     while True:
         await asyncio.sleep(args.poll)
         writer.write(pkt)
@@ -222,6 +224,8 @@ async def main() -> None:
     p.add_argument("--fc", type=lambda s: int(s, 0), default=0x03, help="0x03 holding / 0x04 input")
     p.add_argument("--start", type=int, default=0)
     p.add_argument("--count", type=int, default=14)
+    p.add_argument("--cmd-type", type=lambda s: int(s, 0), default=5,
+                   help="Codec 12 type byte for the poll: 5 = GPRS command channel, or the RS-485 'Command ID' configured on the unit (6)")
     p.add_argument("-v", "--verbose", action="store_true", help="also log AVL packet acks")
     args = p.parse_args()
 
