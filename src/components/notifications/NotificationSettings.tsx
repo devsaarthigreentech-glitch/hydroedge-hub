@@ -7,6 +7,11 @@
 // A person is emailed only when their company is ON, they are ON, their account
 // is active, and they have an email address. Muting a company skips its devices
 // in the alert scan entirely, so nothing is sent and nothing is logged.
+//
+// Customer users get the same component, but /api/notifications answers with
+// `scoped: true` and only their company, so the fleet-wide chrome (summary
+// tiles, search, subscribed/unsubscribed filter) is dropped and their one
+// company opens pre-expanded.
 // ============================================================================
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -52,6 +57,7 @@ type Filter = "all" | "subscribed" | "unsubscribed";
 export function NotificationSettings() {
   const [customers, setCustomers] = useState<NotifCustomer[]>([]);
   const [summary, setSummary]     = useState<Summary | null>(null);
+  const [scoped, setScoped]       = useState(false);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState("");
   const [filter, setFilter]       = useState<Filter>("all");
@@ -67,6 +73,11 @@ export function NotificationSettings() {
       if (json.success) {
         setCustomers(json.data);
         setSummary(json.summary);
+        setScoped(!!json.scoped);
+        // A customer user has exactly one row — show their people straight away.
+        if (json.scoped) {
+          setExpanded(new Set((json.data as NotifCustomer[]).map((c) => c.id)));
+        }
         setError("");
       } else {
         setError(json.error || "Failed to load notification settings");
@@ -171,14 +182,14 @@ export function NotificationSettings() {
           Alert Notifications
         </div>
         <div style={{ fontSize: 12, color: MUTED, marginTop: 4, lineHeight: 1.6 }}>
-          Turn alert emails on or off per company, or per person within a company.
-          Muting a company stops every email for it — its devices are skipped by the
-          alert scan entirely.
+          {scoped
+            ? "Turn alert emails on or off for your company, or for individual people. Switching the company off stops every alert email for it."
+            : "Turn alert emails on or off per company, or per person within a company. Muting a company stops every email for it — its devices are skipped by the alert scan entirely."}
         </div>
       </div>
 
-      {/* Summary tiles */}
-      {summary && (
+      {/* Summary tiles — fleet-wide only */}
+      {summary && !scoped && (
         <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
           <Tile label="Companies"    value={summary.companies}              color="#6366f1" />
           <Tile label="Subscribed"   value={summary.companies_subscribed}   color={GREEN} />
@@ -196,7 +207,8 @@ export function NotificationSettings() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters — pointless with a single company */}
+      {!scoped && (
       <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <input
           type="text"
@@ -228,6 +240,7 @@ export function NotificationSettings() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Company rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
