@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
 import { timeAgo, formatTimestamp } from "@/lib/utils";
+import { boolLabel, BoolKind, NanoVariant } from "@/lib/nano-pids";
 
 // ── Types matching /api/nano/live ──────────────────────────────────────────
 interface Measured {
@@ -14,6 +15,7 @@ interface Measured {
   category: string;
   data_type: string | null;
   conditional: boolean;
+  bool_kind: BoolKind | null;
   present: boolean;
 }
 interface Fault {
@@ -25,6 +27,7 @@ interface Fault {
   condition: string | null;
 }
 interface NanoState {
+  firmware: NanoVariant;
   online: boolean | null;
   net: string | null;
   last_ts_utc: string | null;
@@ -37,17 +40,32 @@ interface NanoState {
 }
 
 // ── Presentation grouping (registry lumps all measured into one category, so
-//    we group by meaning here for a readable live view) ──────────────────────
-const GROUPS: Array<{ title: string; icon: string; color: string; bg: string; pids: string[] }> = [
+//    we group by meaning here for a readable live view). A group lists every
+//    PID either firmware generation could send; the API only returns the ones
+//    the reporting generation publishes, so empty groups simply don't render.
+type Group = { title: string; icon: string; color: string; bg: string; pids: string[] };
+const GROUPS: Group[] = [
   { title: "Electrolyser & HHO", icon: "⚡", color: THEME.primary[500], bg: THEME.primary[50],
-    pids: ["P-4075", "P-4093", "P-4094", "P-4095", "P-4102", "P-4099"] },
+    pids: ["P-4075", "P-802", "P-4093", "P-4094", "P-4095", "P-4102", "P-4099"] },
+  { title: "Analog Box Status", icon: "🎛️", color: "#0891b2", bg: "#ecfeff",
+    pids: ["P-4114", "P-4113", "P-4110", "P-4111", "P-4112"] },
   { title: "Tank Levels", icon: "🪣", color: THEME.accent[600], bg: THEME.accent[50],
     pids: ["P-4096", "P-4097", "P-4098"] },
+  { title: "Temperature & Thermal Guard", icon: "🌡️", color: "#ea580c", bg: "#fff7ed",
+    pids: ["P-4118", "P-4119", "P-4120", "P-4121", "P-4122"] },
+  { title: "Adaptive RCS", icon: "🎚️", color: "#65a30d", bg: "#f7fee7",
+    pids: ["P-5250", "P-5251"] },
   { title: "Connectivity", icon: "📶", color: "#3b82f6", bg: "#eff6ff",
     pids: ["P-4100", "P-4101"] },
   { title: "Engine (CAN / Modbus)", icon: "🚛", color: "#7c3aed", bg: "#f5f3ff",
-    pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108"] },
+    pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117"] },
 ];
+
+const FW_LABEL: Record<NanoVariant, string> = {
+  gen2: "Nano Gen 2",
+  v3: "NanoV3 gateway",
+  unknown: "Nano",
+};
 
 const SEV_COLOR: Record<string, string> = {
   Critical: "#dc2626", Fault: "#ef4444", Warning: "#f59e0b", Info: "#3b82f6", Unknown: "#6b7280",
@@ -107,7 +125,7 @@ export function NanoLiveTab({ device }: { device: Device }) {
             Live Telemetry
           </div>
           <div style={{ fontSize: 13, color: THEME.text.secondary }}>
-            GreenVision Nano · measured status every ~30s
+            GreenVision {FW_LABEL[state?.firmware ?? "unknown"]} · measured status on cadence and on every input change
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -319,8 +337,9 @@ function renderValue(m: Measured): { text: string; muted?: boolean; color?: stri
   if (!m.present) return { text: "—", muted: true };
   const v = m.value;
   if (typeof v === "boolean") {
-    // For *_low / overtemp booleans, true is the noteworthy state
-    return { text: v ? "TRUE" : "FALSE", color: v ? "#ef4444" : undefined };
+    // Colour by what the flag means, not by its raw value: a pump running is
+    // neutral, water present is good, remote stop asserted is an alarm.
+    return boolLabel(v, m.bool_kind ?? undefined);
   }
   if (typeof v === "number") return { text: m.unit ? `${v} ${m.unit}` : String(v) };
   return { text: String(v) };

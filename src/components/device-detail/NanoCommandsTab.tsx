@@ -62,8 +62,14 @@ export function NanoCommandsTab({ device }: { device: Device }) {
     const res = await fetch(`/api/nano/live?device_id=${device.id}`);
     const d = await res.json();
     if (d.success) {
-      const p = (d.data.measured || []).find((m: any) => m.pid === "P-4102");
-      setPermit(p?.value ?? null);
+      // Gen 2 reports a permit state (P-4102). NanoV3 has none — its stop line
+      // (P-4114 remote stop asserted) is the equivalent run/stop indication.
+      const measured: any[] = d.data.measured || [];
+      const permit = measured.find((m) => m.pid === "P-4102");
+      const stopLine = measured.find((m) => m.pid === "P-4114");
+      if (permit?.present) setPermit(permit.value ?? null);
+      else if (stopLine?.present) setPermit(stopLine.value ? "STOP" : "RUN");
+      else setPermit(null);
       setOnline(d.data.state?.online ?? null);
     }
   }, [device.id]);

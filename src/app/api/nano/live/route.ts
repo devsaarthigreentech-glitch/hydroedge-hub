@@ -1,13 +1,21 @@
 // ============================================================================
 // API ROUTE: /api/nano/live?device_id=<uuid>
 // ----------------------------------------------------------------------------
-// Live snapshot for a GreenVision Nano (Gen 2) device. Reads the single
-// nano_device_state row (upserted on every frame by nano_ingest.py), resolves
-// the 17 measured PIDs against nano_registry for names/units/categories, and
-// resolves active faults against nano_alert_catalog for severity + message key.
+// Live snapshot for a GreenVision Nano device — Gen 2 or NanoV3, which share
+// the topic, the IMEI and this table. Reads the single nano_device_state row
+// (upserted on every frame by nano_ingest.py), works out which firmware sent
+// the last frame from the PIDs it carried, resolves the measured PIDs against
+// nano_registry for names/units/categories (falling back to lib/nano-pids for
+// PIDs the registry doesn't know yet), and resolves active faults against
+// nano_alert_catalog for severity + message key.
+//
+// Only the PIDs the reporting generation actually publishes are returned, so
+// a NanoV3 unit doesn't show a row of permanently-empty Gen 2 values and vice
+// versa. Level-sensor names follow the generation (Gen 2: "level low" = true
+// is a water short; NanoV3: "water present" = true is OK).
 //
 // Response shape:
-//   { success, data: { device, state, measured[], faults[] } }
+//   { success, data: { device, state{ ..., firmware }, measured[], faults[] } }
 //
 // ?compact=1 -> device + state only (skips the registry / catalog lookups).
 //               Used by the Nano detail header for its "last seen" clock.
@@ -15,28 +23,54 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { detectVariant, pidMeta, NanoVariant } from '@/lib/nano-pids';
 
 // state-column -> registry PID map (mirrors nano_ingest.py). `conditional` = CAN/
-// Modbus values that are absent (NULL) when the source isn't reporting — never 0.
-const MEASURED: Array<{ col: string; pid: string; conditional: boolean }> = [
-  { col: 'cell_current', pid: 'P-4075', conditional: false },
-  { col: 'supply_voltage', pid: 'P-4093', conditional: false },
-  { col: 'electrode_temp', pid: 'P-4094', conditional: false },
-  { col: 'ambient_temp', pid: 'P-4095', conditional: false },
-  { col: 'level_main', pid: 'P-4096', conditional: false },
-  { col: 'level_bubbler', pid: 'P-4097', conditional: false },
-  { col: 'level_electrolyte', pid: 'P-4098', conditional: false },
-  { col: 'ps_overtemp', pid: 'P-4099', conditional: false },
-  { col: 'active_bearer', pid: 'P-4100', conditional: false },
-  { col: 'rssi', pid: 'P-4101', conditional: false },
-  { col: 'permit_state', pid: 'P-4102', conditional: false },
-  { col: 'load_kw', pid: 'P-4103', conditional: true },
-  { col: 'engine_rpm', pid: 'P-4104', conditional: true },
-  { col: 'engine_load_pct', pid: 'P-4105', conditional: true },
-  { col: 'fuel_rate_lph', pid: 'P-4106', conditional: true },
-  { col: 'total_fuel_l', pid: 'P-4107', conditional: true },
-  { col: 'engine_hours', pid: 'P-4108', conditional: true },
+// Modbus/optional-sensor values that are absent (NULL) when the source isn't
+// reporting — never 0. `gen` = which firmware publishes it ('both' | 'gen2' | 'v3').
+type Gen = 'both' | 'gen2' | 'v3';
+const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen }> = [
+  { col: 'cell_current', pid: 'P-4075', conditional: false, gen: 'both' },
+  { col: 'supply_voltage', pid: 'P-4093', conditional: false, gen: 'both' },
+  { col: 'rcs_setpoint', pid: 'P-802', conditional: false, gen: 'v3' },
+  { col: 'electrode_temp', pid: 'P-4094', conditional: false, gen: 'gen2' },
+  { col: 'ambient_temp', pid: 'P-4095', conditional: false, gen: 'gen2' },
+  { col: 'electrolyser_temp', pid: 'P-4118', conditional: true, gen: 'v3' },
+  { col: 'temp_present', pid: 'P-4119', conditional: false, gen: 'v3' },
+  { col: 'level_main', pid: 'P-4096', conditional: false, gen: 'both' },
+  { col: 'level_bubbler', pid: 'P-4097', conditional: false, gen: 'both' },
+  { col: 'level_electrolyte', pid: 'P-4098', conditional: false, gen: 'both' },
+  { col: 'pump1', pid: 'P-4110', conditional: false, gen: 'v3' },
+  { col: 'pump2', pid: 'P-4111', conditional: false, gen: 'v3' },
+  { col: 'solenoid', pid: 'P-4112', conditional: false, gen: 'v3' },
+  { col: 'engine_run', pid: 'P-4113', conditional: false, gen: 'v3' },
+  { col: 'remote_stop', pid: 'P-4114', conditional: false, gen: 'v3' },
+  { col: 'thermal_lockout', pid: 'P-4120', conditional: false, gen: 'v3' },
+  { col: 'jacket_on', pid: 'P-4121', conditional: false, gen: 'v3' },
+  { col: 'jacket_fault', pid: 'P-4122', conditional: true, gen: 'v3' },
+  { col: 'rcs_zone', pid: 'P-5250', conditional: true, gen: 'v3' },
+  { col: 'rcs_reason', pid: 'P-5251', conditional: true, gen: 'v3' },
+  { col: 'ps_overtemp', pid: 'P-4099', conditional: false, gen: 'gen2' },
+  { col: 'active_bearer', pid: 'P-4100', conditional: false, gen: 'both' },
+  { col: 'rssi', pid: 'P-4101', conditional: false, gen: 'both' },
+  { col: 'permit_state', pid: 'P-4102', conditional: false, gen: 'gen2' },
+  { col: 'load_kw', pid: 'P-4103', conditional: true, gen: 'gen2' },
+  { col: 'engine_rpm', pid: 'P-4104', conditional: true, gen: 'both' },
+  { col: 'engine_load_pct', pid: 'P-4105', conditional: true, gen: 'both' },
+  { col: 'fuel_rate_lph', pid: 'P-4106', conditional: true, gen: 'both' },
+  { col: 'total_fuel_l', pid: 'P-4107', conditional: true, gen: 'both' },
+  { col: 'engine_hours', pid: 'P-4108', conditional: true, gen: 'both' },
+  { col: 'vehicle_speed_kph', pid: 'P-4115', conditional: true, gen: 'v3' },
+  { col: 'coolant_temp', pid: 'P-4116', conditional: true, gen: 'v3' },
+  { col: 'fuel_level_pct', pid: 'P-4117', conditional: true, gen: 'v3' },
 ];
+
+// Which generation's PIDs to show for a detected variant. Unknown (no frame
+// yet, or neither marker present) shows everything so nothing is hidden.
+function showsGen(variant: NanoVariant, gen: Gen): boolean {
+  if (gen === 'both' || variant === 'unknown') return true;
+  return gen === variant;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -61,6 +95,10 @@ export async function GET(request: NextRequest) {
          s.active_bearer, s.rssi, s.permit_state,
          s.load_kw, s.engine_rpm, s.engine_load_pct, s.fuel_rate_lph,
          s.total_fuel_l, s.engine_hours,
+         s.rcs_setpoint, s.pump1, s.pump2, s.solenoid, s.engine_run, s.remote_stop,
+         s.vehicle_speed_kph, s.coolant_temp, s.fuel_level_pct,
+         s.electrolyser_temp, s.temp_present, s.thermal_lockout,
+         s.jacket_on, s.jacket_fault, s.rcs_zone, s.rcs_reason,
          s.last_lat, s.last_lon, s.gps_fix, s.gps_sat,
          s.active_faults, s.d AS raw_d
        FROM devices d
@@ -87,8 +125,11 @@ export async function GET(request: NextRequest) {
       protocol: row.protocol,
     };
 
+    const firmware: NanoVariant = detectVariant(row.raw_d);
+
     const state = row.state_present
       ? {
+          firmware,
           online: row.online,
           status_ts: row.status_ts,
           net: row.net,
@@ -124,17 +165,23 @@ export async function GET(request: NextRequest) {
     const reg: Record<string, any> = {};
     regRes.rows.forEach((r: any) => (reg[r.pid] = r));
 
-    const measured = MEASURED.map((m) => {
+    const measured = MEASURED.filter((m) => showsGen(firmware, m.gen)).map((m) => {
       const r = reg[m.pid] || {};
+      const local = pidMeta(m.pid, firmware);
       const value = row[m.col];
+      // NanoV3 level PIDs carry the opposite polarity to the Gen 2 registry
+      // name ("... Level Low"), so the local name wins for those; otherwise the
+      // registry is authoritative and lib/nano-pids only fills gaps.
+      const levelV3 = firmware === 'v3' && ['P-4096', 'P-4097', 'P-4098'].includes(m.pid);
       return {
         pid: m.pid,
-        name: r.name || m.col,
+        name: (levelV3 ? local?.name : r.name) || local?.name || m.col,
         value,
-        unit: r.units ?? null,
+        unit: r.units ?? local?.unit ?? null,
         category: r.category ?? 'Other',
         data_type: r.data_type ?? null,
         conditional: m.conditional,
+        bool_kind: local?.bool ?? null,
         present: value !== null && value !== undefined,
       };
     });

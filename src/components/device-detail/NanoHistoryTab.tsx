@@ -3,27 +3,12 @@
 import React, { useState, useCallback } from "react";
 import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
+import { detectVariant, pidMeta, boolLabel, NanoVariant } from "@/lib/nano-pids";
 
-// ── Measured-PID display names (frames only ever carry these) ────────────────
-const PID_META: Record<string, { name: string; unit?: string; bool?: boolean }> = {
-  "P-4075": { name: "Cell Current", unit: "A" },
-  "P-4093": { name: "Supply Voltage", unit: "V" },
-  "P-4094": { name: "Electrode Temp", unit: "°C" },
-  "P-4095": { name: "Ambient Temp", unit: "°C" },
-  "P-4096": { name: "Main Level Low", bool: true },
-  "P-4097": { name: "Bubbler Level Low", bool: true },
-  "P-4098": { name: "Electrolyte Level Low", bool: true },
-  "P-4099": { name: "PS Over-Temp", bool: true },
-  "P-4100": { name: "Active Bearer" },
-  "P-4101": { name: "RSSI", unit: "dBm" },
-  "P-4102": { name: "Permit State" },
-  "P-4103": { name: "Load", unit: "kW" },
-  "P-4104": { name: "Engine RPM", unit: "rpm" },
-  "P-4105": { name: "Engine Load", unit: "%" },
-  "P-4106": { name: "Fuel Rate", unit: "L/h" },
-  "P-4107": { name: "Total Fuel", unit: "L" },
-  "P-4108": { name: "Engine Hours", unit: "h" },
-};
+// Measured-PID names/units/boolean meaning live in lib/nano-pids so the live
+// and history views agree. Resolved per frame: a device reflashed from Gen 2
+// to NanoV3 has both kinds of frame in its history, and the level PIDs mean
+// opposite things in each ("level low" vs "water present").
 
 interface Frame {
   id: number;
@@ -47,12 +32,21 @@ function formatIST(ts: string): string {
   });
 }
 
-function fmtVal(pid: string, v: any): string {
-  const m = PID_META[pid];
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (m?.unit) return `${v} ${m.unit}`;
-  return String(v);
+function fmtVal(pid: string, v: any, variant: NanoVariant): { text: string; color?: string } {
+  const m = pidMeta(pid, variant);
+  if (v === null || v === undefined) return { text: "—" };
+  if (typeof v === "boolean") return boolLabel(v, m?.bool);
+  if (m?.unit) return { text: `${v} ${m.unit}` };
+  return { text: String(v) };
+}
+
+// One-word run state for the table: Gen 2 reports its permit state directly;
+// NanoV3 has no permit machine — the stop line (P-4114) is the equivalent.
+function runState(d: Record<string, any> | null | undefined): string {
+  if (!d) return "—";
+  if (d["P-4102"] !== undefined) return String(d["P-4102"]);
+  if (d["P-4114"] !== undefined) return d["P-4114"] ? "STOP" : "RUN";
+  return "—";
 }
 
 export function NanoHistoryTab({ device }: { device: Device }) {
@@ -152,7 +146,7 @@ export function NanoHistoryTab({ device }: { device: Device }) {
                     <th style={th}>Seq</th>
                     <th style={th}>Uptime</th>
                     <th style={th}>Net</th>
-                    <th style={th}>Permit</th>
+                    <th style={th}>State</th>
                     <th style={th}>Bearer</th>
                     <th style={th}>Faults</th>
                   </tr>
@@ -172,7 +166,7 @@ export function NanoHistoryTab({ device }: { device: Device }) {
                           <td style={td}>{f.seq}</td>
                           <td style={td}>{f.up}s</td>
                           <td style={td}>{f.net || "—"}</td>
-                          <td style={{ ...td, color: THEME.text.primary, fontWeight: 600 }}>{f.d?.["P-4102"] ?? "—"}</td>
+                          <td style={{ ...td, color: runState(f.d) === "STOP" ? "#dc2626" : THEME.text.primary, fontWeight: 600 }}>{runState(f.d)}</td>
                           <td style={td}>{f.d?.["P-4100"] ?? "—"}</td>
                           <td style={td}>
                             {f.faults && f.faults.length > 0
@@ -188,11 +182,13 @@ export function NanoHistoryTab({ device }: { device: Device }) {
                                 {/* Decoded measured values */}
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8, marginBottom: 12 }}>
                                   {Object.entries(f.d || {}).map(([pid, v]) => {
-                                    const m = PID_META[pid];
+                                    const variant = detectVariant(f.d);
+                                    const m = pidMeta(pid, variant);
+                                    const val = fmtVal(pid, v, variant);
                                     return (
                                       <div key={pid} style={{ background: "white", border: `1px solid ${THEME.border.light}`, borderRadius: 8, padding: "8px 12px" }}>
                                         <div style={{ fontSize: 10, color: THEME.text.tertiary }}>{m?.name || pid} <span style={{ color: THEME.neutral[300] }}>· {pid}</span></div>
-                                        <div style={{ fontSize: 14, fontWeight: 700, color: THEME.text.primary, fontFamily: "JetBrains Mono, monospace" }}>{fmtVal(pid, v)}</div>
+                                        <div style={{ fontSize: 14, fontWeight: 700, color: val.color || THEME.text.primary, fontFamily: "JetBrains Mono, monospace" }}>{val.text}</div>
                                       </div>
                                     );
                                   })}
