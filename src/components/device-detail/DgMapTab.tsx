@@ -196,7 +196,7 @@ export function DgMapTab({ device }: DgMapTabProps) {
             📍 Installed Location
           </div>
           <div style={{ fontSize: isMobile ? 11 : 13, color: THEME.text.secondary, marginTop: 3 }}>
-            Where this unit sits, and whether it has moved
+            Where this generator sits, and whether it has moved
           </div>
         </div>
 
@@ -221,7 +221,7 @@ export function DgMapTab({ device }: DgMapTabProps) {
           padding: "12px 16px", marginBottom: 16, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <span style={{ fontSize: 16 }}>📍</span>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#7f1d1d" }}>This unit has moved</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#7f1d1d" }}>This generator has moved</div>
             <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 2, lineHeight: 1.5 }}>
               Its fixes span about {movement.spread_km?.toFixed(1)} km over the last {DRIFT_WINDOW_DAYS} days,
               past the {movement.threshold_km} km limit. Confirm it was relocated and update the site record.
@@ -262,7 +262,7 @@ export function DgMapTab({ device }: DgMapTabProps) {
             Position is checked over the last {DRIFT_WINDOW_DAYS} days. The shaded circle is how far this
             unit&rsquo;s fixes spread in that time, not an accuracy figure — consumer GNSS wanders by tens of
             metres while standing still, which is why the movement limit is {movement?.threshold_km ?? 20} km
-            rather than any drift at all. Route playback is not shown on this view.
+            rather than any drift at all. Route playback is not shown: a generator has no route.
           </div>
         </>
       )}

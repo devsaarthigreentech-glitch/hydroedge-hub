@@ -922,20 +922,11 @@ interface MapTabProps {
   device: Device;
 }
 
-// SGT-GX-0726-0028 is an EOW unit sitting installed with a marginal GPS fix
-// (4 satellites, near buildings and a water body) — the same stationary-jitter
-// pattern DgMapTab exists for, just on hardware that CAN legitimately travel.
-// Scoped to this one device for now rather than all EOW assets: an EOW that is
-// actually being towed between sites still wants real route playback, and we
-// don't yet have a rule (like DG's GPS-spread check) to tell "parked" from
-// "moving" for this asset type. Revisit if more EOW units show the same jitter.
-const JITTER_AWARE_OVERRIDE_DEVICE_NAMES = new Set(["SGT-GX-0726-0028"]);
-
 export function MapTab({ device }: MapTabProps) {
   // A generator has no route to play back. Hand it to the installed-location
   // view before any of the route-history state below is set up, so the vehicle
   // map's polling never runs for a device that cannot travel.
-  if (device.asset_name === "DG" || JITTER_AWARE_OVERRIDE_DEVICE_NAMES.has(device.device_name || "")) {
+  if (device.asset_name === "DG") {
     return <DgMapTab device={device} />;
   }
   return <VehicleMapTab device={device} />;
