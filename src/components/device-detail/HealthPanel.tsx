@@ -1572,7 +1572,8 @@ function computeAlarmsFMB(
   calcCurrent: (t: TelemetryParam[]) => number | null,
   waterIoId: number,
   setAin1Raw: number | null,
-  divisor: number
+  divisor: number,
+  isEOW: boolean
 ): Alarm[] {
   const alarms: Alarm[] = [];
 
@@ -1585,10 +1586,11 @@ function computeAlarmsFMB(
 
   const isRunning  = din1 === 1 && ain1A !== null && ain1A > 2;
   const waterShort = ain2V !== null ? ain2V > 20 : null;
+  const label      = isEOW ? "engine" : "DG set";
 
   if (din1 === 0 && ain1A !== null && ain1A > 2)
     alarms.push({ id: "abnormal_current_off", severity: "critical",
-      message: "Abnormal: current detected but DG set is OFF",
+      message: `Abnormal: current detected but ${label} is OFF`,
       action: "Contact Saarthi Support immediately" });
 
   if (din1 === 1) {
@@ -1599,7 +1601,7 @@ function computeAlarmsFMB(
 
     if (ain1A !== null && ain1A < 2 && dout1 === 0)
       alarms.push({ id: "abnormal_no_current", severity: "critical",
-        message: "Abnormal: DG set is ON but no output current",
+        message: `Abnormal: ${label} is ON but no output current`,
         action: "Contact Saarthi Support immediately" });
 
     if (isRunning && waterShort === true)
@@ -1858,8 +1860,8 @@ export function GreenXHealthPanel({
           tankShortSince:    tankShortSinceRef.current,
         })
       : isFMB120
-        ? computeAlarmsFMB(telemetry, calcCurrentFMB120, FMB120_WATER_IO, setAin1Raw, currentDivisor)
-        : computeAlarmsFMB(telemetry, calcCurrentFMB150, 6, setAin1Raw, currentDivisor)
+        ? computeAlarmsFMB(telemetry, calcCurrentFMB120, FMB120_WATER_IO, setAin1Raw, currentDivisor, isEOW)
+        : computeAlarmsFMB(telemetry, calcCurrentFMB150, 6, setAin1Raw, currentDivisor, isEOW)
   );
 
   const hasAlarms   = alarms.length > 0 || isDataBlocked;
