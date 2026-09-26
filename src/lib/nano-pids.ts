@@ -11,7 +11,8 @@
 //   v3    NanoV3 — gateway beside the vendor analog box: pump/solenoid/engine
 //         status (P-4110..4113), remote-stop output (P-4114), RCS set-point
 //         (P-802), PT100 temp (P-4118/4119), thermal lockout (P-4120), heating
-//         jacket (P-4121/4122), adaptive RCS (P-5250/5251). Level PIDs mean
+//         jacket (P-4121/4122), adaptive RCS (P-5250/5251), OTA job
+//         (P-4123..4125). P-4100 may also read "WiFi". Level PIDs mean
 //         "water PRESENT" (true = OK) — the opposite polarity to gen2.
 //
 // Detection is by key presence, not by schema version (`v` is 2 on both).
@@ -85,6 +86,9 @@ export const PID_META: Record<string, PidMeta> = {
   'P-4122': { name: 'Heating Jacket Fault', bool: 'alarm', conditional: true },
   'P-5250': { name: 'Auto-RCS Zone', conditional: true },
   'P-5251': { name: 'Auto-RCS Reason', conditional: true },
+  'P-4123': { name: 'OTA State' },
+  'P-4124': { name: 'OTA Progress', unit: '%', conditional: true },
+  'P-4125': { name: 'OTA Last Result', conditional: true },
 };
 
 const V3_LEVEL_NAMES: Record<string, string> = {
