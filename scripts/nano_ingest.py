@@ -473,11 +473,13 @@ class DB:
                 device_id, pid,
                 None if val is None else str(val), _num(val),
                 res, payload.get("src"), ts, ts_to_utc(ts)))
-            # correlate to the most recent pending command for this pid+device
+            # correlate to the most recent open command for this pid+device. The
+            # Commands tab marks a row "sent" once published, so match "sent" as
+            # well as "pending" -- matching only "pending" left every row at SENT.
             cur.execute("""
                 UPDATE nano_commands SET status=%s, result_reason=%s, resolved_at=now()
                 WHERE id = (SELECT id FROM nano_commands
-                            WHERE device_id=%s AND pid=%s AND status='pending'
+                            WHERE device_id=%s AND pid=%s AND status IN ('pending','sent')
                             ORDER BY sent_at DESC LIMIT 1);
             """, ("ok" if res == "ok" else "nack",
                   None if res == "ok" else res, device_id, pid))

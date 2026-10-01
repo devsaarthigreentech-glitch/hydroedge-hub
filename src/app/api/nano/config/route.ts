@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     for (const r of res.rows as any[]) {
       const settable: string[] = r.settable_via || [];
-      const cloudSettable = r.access === 'RW' && settable.includes('Cloud');
+      const cloudSettable = ['RW', 'WO'].includes(r.access) && settable.includes('Cloud');
       if (cloudSettable) editable++;
 
       if (!cats[r.category]) {

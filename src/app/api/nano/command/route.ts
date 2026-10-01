@@ -2,10 +2,14 @@
 // API ROUTE: /api/nano/command   (POST)
 // ----------------------------------------------------------------------------
 // Body: { device_id, verb: 'set'|'stop'|'start', pid?, value?, confirm? }
-// Validates against nano_registry (Cloud-settable only), guards P-802 (moves
-// electrolyser current — needs confirm:true), logs to nano_commands (pending),
-// publishes the /cmd frame. The config-mirror writeback (caught by
-// nano_ingest.py) flips the row to ok/nack.
+// Validates against nano_registry (Cloud-settable RW or WO), guards P-802
+// (moves electrolyser current — needs confirm:true), logs to nano_commands
+// (pending, then sent once published), publishes the /cmd frame. The
+// config-mirror writeback (caught by nano_ingest.py) flips the row to ok/nack.
+//
+// WO (write-only) parameters such as P-514 Wi-Fi passphrase are sent to the
+// device in full but logged as '***': the command log is visible to every
+// operator and must never become the place a secret can be read back from.
 //
 // GET /api/nano/command?device_id=<uuid>&limit=30 — recent command log.
 // ============================================================================
@@ -57,6 +61,7 @@ export async function POST(request: NextRequest) {
     let payload: any;
     let rpid: string;
     let rval: any = null;
+    let secret = false;   // WO parameter: never store or echo the value
 
     if (verb === 'stop') {
       payload = { cmd: 'stop' }; rpid = 'P-1101'; rval = 'Stop';
@@ -76,7 +81,7 @@ export async function POST(request: NextRequest) {
       }
       const m = reg.rows[0];
       const settable: string[] = m.settable_via || [];
-      if (m.access !== 'RW' || !settable.includes('Cloud')) {
+      if (!['RW', 'WO'].includes(m.access) || !settable.includes('Cloud')) {
         return NextResponse.json(
           { success: false, error: `${pid} is not Cloud-settable (access ${m.access}, via ${settable.join('|') || '-'})` },
           { status: 400 }
@@ -87,6 +92,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: `${pid} expects one of ${m.enum_values.join(', ')}` }, { status: 400 });
       }
       rpid = pid;
+      secret = m.access === 'WO';
       payload = { cmd: 'set', id: pid, val: rval };
     }
 
@@ -101,7 +107,9 @@ export async function POST(request: NextRequest) {
     const ins = await query(
       `INSERT INTO nano_commands (device_id, verb, pid, value_text, payload, issued_by, status)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,'pending') RETURNING id`,
-      [device_id, verb, rpid, rval === null ? null : String(rval), JSON.stringify(payload), 'web']
+      [device_id, verb, rpid,
+       secret ? '***' : (rval === null ? null : String(rval)),
+       JSON.stringify(secret ? { ...payload, val: '***' } : payload), 'web']
     );
     const cmdId = ins.rows[0].id;
 

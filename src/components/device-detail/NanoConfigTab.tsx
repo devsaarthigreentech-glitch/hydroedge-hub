@@ -222,7 +222,7 @@ export function NanoConfigTab({ device }: { device: Device }) {
             </div>
           )}
           {visibleParams.map((p) => (
-            <ParamRow key={p.pid} p={p} value={edits[p.pid] ?? (p.current_value ?? p.default_value ?? "")} changed={changed.has(p.pid)}
+            <ParamRow key={p.pid} p={p} value={edits[p.pid] ?? (p.access === "WO" ? "" : (p.current_value ?? p.default_value ?? ""))} changed={changed.has(p.pid)}
               onChange={(v) => setEdit(p.pid, v)} onSet={async () => { const ok = await sendOne(p.pid, edits[p.pid] ?? (p.current_value ?? "")); if (ok) { setChanged((s) => { const n = new Set(s); n.delete(p.pid); return n; }); loadLog(); setTimeout(loadConfig, 1500); } }} />
           ))}
         </div>
@@ -294,7 +294,8 @@ function ParamRow({ p, value, changed, onChange, onSet }: { p: Param; value: str
                 <option value="false">false</option>
               </select>
             ) : (
-              <input type={["float", "int16", "uint16", "uint32", "uint8"].includes(p.data_type || "") ? "number" : "text"}
+              <input type={p.access === "WO" ? "password" : ["float", "int16", "uint16", "uint32", "uint8"].includes(p.data_type || "") ? "number" : "text"}
+                placeholder={p.access === "WO" ? "enter new value" : undefined} autoComplete={p.access === "WO" ? "new-password" : undefined}
                 value={value} onChange={(e) => onChange(e.target.value)} style={field} />
             )}
           </div>
