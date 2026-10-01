@@ -71,6 +71,9 @@ export const PID_META: Record<string, PidMeta> = {
 
   // ---- v3 only -----------------------------------------------------------
   'P-802':  { name: 'RCS Set-point', unit: 'A' },
+  // false => the box is not producing (cell current ~0 or engine stopped); the
+  // firmware then reports pump 1 / pump 2 / solenoid idle whatever their lines read.
+  'P-4126': { name: 'Plant Producing', bool: 'ok' },
   'P-4110': { name: 'Pump 1 Running', bool: 'active' },
   'P-4111': { name: 'Pump 2 Running', bool: 'active' },
   'P-4112': { name: 'Solenoid Valve Open', bool: 'active' },

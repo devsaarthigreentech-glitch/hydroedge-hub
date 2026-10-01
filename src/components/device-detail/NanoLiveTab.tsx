@@ -48,7 +48,7 @@ const GROUPS: Group[] = [
   { title: "Electrolyser & HHO", icon: "⚡", color: THEME.primary[500], bg: THEME.primary[50],
     pids: ["P-4075", "P-802", "P-4093", "P-4094", "P-4095", "P-4102", "P-4099"] },
   { title: "Analog Box Status", icon: "🎛️", color: "#0891b2", bg: "#ecfeff",
-    pids: ["P-4114", "P-4113", "P-4110", "P-4111", "P-4112"] },
+    pids: ["P-4126", "P-4114", "P-4113", "P-4110", "P-4111", "P-4112"] },
   { title: "Tank Levels", icon: "🪣", color: THEME.accent[600], bg: THEME.accent[50],
     pids: ["P-4096", "P-4097", "P-4098"] },
   { title: "Temperature & Thermal Guard", icon: "🌡️", color: "#ea580c", bg: "#fff7ed",

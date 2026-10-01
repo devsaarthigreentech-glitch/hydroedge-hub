@@ -40,6 +40,7 @@ const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen
   { col: 'level_main', pid: 'P-4096', conditional: false, gen: 'both' },
   { col: 'level_bubbler', pid: 'P-4097', conditional: false, gen: 'both' },
   { col: 'level_electrolyte', pid: 'P-4098', conditional: false, gen: 'both' },
+  { col: 'plant_producing', pid: 'P-4126', conditional: false, gen: 'v3' },
   { col: 'pump1', pid: 'P-4110', conditional: false, gen: 'v3' },
   { col: 'pump2', pid: 'P-4111', conditional: false, gen: 'v3' },
   { col: 'solenoid', pid: 'P-4112', conditional: false, gen: 'v3' },
@@ -102,7 +103,7 @@ export async function GET(request: NextRequest) {
          s.vehicle_speed_kph, s.coolant_temp, s.fuel_level_pct,
          s.electrolyser_temp, s.temp_present, s.thermal_lockout,
          s.jacket_on, s.jacket_fault, s.rcs_zone, s.rcs_reason,
-         s.ota_state, s.ota_progress_pct, s.ota_last_result,
+         s.ota_state, s.ota_progress_pct, s.ota_last_result, s.plant_producing,
          s.last_lat, s.last_lon, s.gps_fix, s.gps_sat,
          s.active_faults, s.d AS raw_d
        FROM devices d

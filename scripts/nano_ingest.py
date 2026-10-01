@@ -18,8 +18,9 @@ the same IMEI (a reflashed unit keeps its identity):
     remote-stop output, RCS set-point, PT100 temp, thermal lockout, heating
     jacket, adaptive RCS, OBD2 vehicle values. Level PIDs mean "water PRESENT".
   Both map into nano_device_state; a PID a generation doesn't send stays NULL.
-  Requires migrations 009_nanov3_state_columns.sql and
-  012_nanov3_ota_state_columns.sql for the V3 columns.
+  Requires migrations 009_nanov3_state_columns.sql,
+  012_nanov3_ota_state_columns.sql and 014_nanov3_plant_producing.sql for the
+  V3 columns.
 
 Key behaviours (per SGT-GV-01 + the schema design):
   - ts stored raw; frames with ts=0 (pre-NTP) are kept and ordered by `up`.
@@ -111,6 +112,7 @@ V3_ALWAYS = {
     "P-4120": "thermal_lockout",
     "P-4121": "jacket_on",
     "P-4123": "ota_state",
+    "P-4126": "plant_producing",       # false => pump/solenoid reported idle
 }
 V3_CONDITIONAL = {
     "P-4115": "vehicle_speed_kph",     # OBD2 only
@@ -140,6 +142,7 @@ STATE_COLS = [
     "electrolyser_temp", "temp_present", "thermal_lockout",
     "jacket_on", "jacket_fault", "rcs_zone", "rcs_reason",
     "ota_state", "ota_progress_pct", "ota_last_result",
+    "plant_producing",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
     "active_faults", "d",
 ]
@@ -360,7 +363,7 @@ class DB:
             missing = [c for c in STATE_COLS if c not in have]
             if missing:
                 sys.exit("nano_device_state is missing column(s) %s — apply "
-                         "db/migrations/009 and 012 (nanov3 state columns) first."
+                         "db/migrations/009, 012 and 014 (nanov3 state columns) first."
                          % ", ".join(missing))
 
             # columns that would block a safe auto-create (NOT NULL, no default,
