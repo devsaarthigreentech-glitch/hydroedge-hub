@@ -115,6 +115,23 @@ export function NanoConfigTab({ device }: { device: Device }) {
     return true;
   }, [device.id]);
 
+  // Ask the device for one parameter. The reply lands in nano_param_values a
+  // few seconds later, so refresh while it arrives.
+  const getOne = useCallback(async (pid: string) => {
+    try {
+      const res = await fetch("/api/nano/command", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: device.id, verb: "get", pid }),
+      });
+      const data = await res.json();
+      if (!data.success) { alert(`${pid}: ${data.error || "Read request failed"}`); return; }
+      await loadLog();
+      for (const ms of [2000, 5000, 10000]) setTimeout(loadConfig, ms);
+    } catch {
+      alert("Network error");
+    }
+  }, [device.id, loadConfig, loadLog]);
+
   // Ask the device for every parameter. It answers a few per publish cycle,
   // so values land over several seconds; refresh while they arrive. The device
   // also sends the full set on its own each time it comes online.
@@ -264,7 +281,8 @@ export function NanoConfigTab({ device }: { device: Device }) {
           )}
           {!showFlags && visibleParams.map((p) => (
             <ParamRow key={p.pid} p={p} value={edits[p.pid] ?? (p.access === "WO" ? "" : (p.current_value ?? p.default_value ?? ""))} changed={changed.has(p.pid)}
-              onChange={(v) => setEdit(p.pid, v)} onSet={async () => { const ok = await sendOne(p.pid, edits[p.pid] ?? (p.current_value ?? "")); if (ok) { setChanged((s) => { const n = new Set(s); n.delete(p.pid); return n; }); loadLog(); setTimeout(loadConfig, 1500); } }} />
+              onChange={(v) => setEdit(p.pid, v)} onSet={async () => { const ok = await sendOne(p.pid, edits[p.pid] ?? (p.current_value ?? "")); if (ok) { setChanged((s) => { const n = new Set(s); n.delete(p.pid); return n; }); loadLog(); setTimeout(loadConfig, 1500); } }}
+              onGet={() => getOne(p.pid)} />
           ))}
         </div>
       </div>
@@ -338,10 +356,17 @@ function FlagTable({ flags }: { flags: Param[] }) {
   );
 }
 
-function ParamRow({ p, value, changed, onChange, onSet }: { p: Param; value: string; changed: boolean; onChange: (v: string) => void; onSet: () => void; }) {
+function ParamRow({ p, value, changed, onChange, onSet, onGet }: { p: Param; value: string; changed: boolean; onChange: (v: string) => void; onSet: () => void; onGet: () => void; }) {
   const editable = p.cloud_settable;
   const restart = p.notes?.includes("runtime_change=N");
   const field: React.CSSProperties = { background: C.field, border: `1px solid ${C.border}`, borderRadius: 5, padding: "6px 8px", color: C.text, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: "100%" };
+  // Reads just this parameter from the device; the reply updates "device:".
+  const getBtn = (
+    <button onClick={onGet} title="Read this value from the device"
+      style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 5, padding: "5px 10px", color: "#93c5fd", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+      Get
+    </button>
+  );
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", marginBottom: 3, borderRadius: 8, background: changed ? "rgba(251,191,36,0.06)" : C.rowBg, border: `1px solid ${changed ? "rgba(251,191,36,0.25)" : C.border}` }}>
@@ -386,10 +411,12 @@ function ParamRow({ p, value, changed, onChange, onSet }: { p: Param; value: str
             style={{ background: changed ? "rgba(0,200,83,0.12)" : "none", border: `1px solid ${changed ? "rgba(0,200,83,0.25)" : C.border}`, borderRadius: 5, padding: "5px 10px", color: changed ? C.green : C.faint, fontSize: 11, fontWeight: 700, cursor: changed ? "pointer" : "default", fontFamily: "inherit", opacity: changed ? 1 : 0.4 }}>
             Set
           </button>
+          {getBtn}
         </div>
       ) : (
-        <div style={{ minWidth: 120, textAlign: "right", fontSize: 12, color: "#93c5fd", fontFamily: "monospace" }}>
-          {p.current_value ?? "—"}
+        <div style={{ minWidth: 120, display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+          <span style={{ fontSize: 12, color: "#93c5fd", fontFamily: "monospace" }}>{p.current_value ?? "—"}</span>
+          {getBtn}
         </div>
       )}
     </div>
