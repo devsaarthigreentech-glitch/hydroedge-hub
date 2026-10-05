@@ -259,6 +259,21 @@ def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def _same_value(wanted, got):
+    """Does a reported t:cfg value confirm a commanded one? Lenient on
+    representation (the device may print 12 as 12.0, a bool as true), strict on
+    content. A command with no stored value (a get), or one stored redacted
+    (a write-only parameter), is confirmed by any value."""
+    if wanted is None or wanted == "***":
+        return True
+    if isinstance(got, bool):
+        return wanted.strip().lower() == ("true" if got else "false")
+    try:
+        return abs(float(wanted) - float(got)) < 1e-6
+    except (TypeError, ValueError):
+        return str(got).strip().lower() == wanted.strip().lower()
+
+
 def ts_to_utc(ts):
     return datetime.fromtimestamp(ts, tz=timezone.utc) if isinstance(ts, int) and ts > 0 else None
 
@@ -476,19 +491,44 @@ class DB:
                 device_id, pid,
                 None if val is None else str(val), _num(val),
                 res, payload.get("src"), ts, ts_to_utc(ts)))
-            # correlate to the most recent open command for this pid+device. The
-            # Commands tab marks a row "sent" once published, so match "sent" as
-            # well as "pending" -- matching only "pending" left every row at SENT.
-            cur.execute("""
-                UPDATE nano_commands SET status=%s, result_reason=%s, resolved_at=now()
-                WHERE id = (SELECT id FROM nano_commands
-                            WHERE device_id=%s AND pid=%s AND status IN ('pending','sent')
-                            ORDER BY sent_at DESC LIMIT 1);
-            """, ("ok" if res == "ok" else "nack",
-                  None if res == "ok" else res, device_id, pid))
-            correlated = cur.rowcount
+            correlated = self._close_command(cur, device_id, pid, val, res)
         self.conn.commit()
         return pid, res, correlated
+
+    def _close_command(self, cur, device_id, pid, val, res):
+        """Close the open command this writeback actually answers.
+
+        A t:cfg frame is the device's reply to a set, to a get, AND to the
+        config dump it publishes on every reconnect -- the three are
+        byte-identical. Matching on pid alone would mark a set that never
+        reached the device as ok the moment it reconnected and dumped its OLD
+        value. So a set/stop/start closes only when the reported value is the
+        one commanded; a get is answered by any value for its pid; a nack
+        (res != ok) is only ever a reply, so it closes the newest open command.
+        An open getall is answered by the first value that arrives.
+
+        The Commands tab marks a row "sent" once published, so open means
+        "pending" or "sent".
+        """
+        cur.execute("""
+            SELECT id, verb, value_text FROM nano_commands
+             WHERE device_id=%s AND pid=%s AND status IN ('pending','sent')
+             ORDER BY sent_at DESC LIMIT 10;
+        """, (device_id, pid))
+        closed = 0
+        for cmd_id, verb, wanted in cur.fetchall():
+            if res != "ok" or verb == "get" or _same_value(wanted, val):
+                cur.execute("""
+                    UPDATE nano_commands SET status=%s, result_reason=%s, resolved_at=now()
+                     WHERE id=%s;
+                """, ("ok" if res == "ok" else "nack", None if res == "ok" else res, cmd_id))
+                closed = 1
+                break
+        cur.execute("""
+            UPDATE nano_commands SET status='ok', resolved_at=now()
+             WHERE device_id=%s AND verb='getall' AND status IN ('pending','sent');
+        """, (device_id,))
+        return closed
 
     def ingest_status(self, device_id, payload):
         online = status_online(payload)

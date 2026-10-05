@@ -1,7 +1,13 @@
 // ============================================================================
 // API ROUTE: /api/nano/command   (POST)
 // ----------------------------------------------------------------------------
-// Body: { device_id, verb: 'set'|'stop'|'start', pid?, value?, confirm? }
+// Body: { device_id, verb: 'set'|'stop'|'start'|'get'|'getall', pid?, value?, confirm? }
+//
+// get / getall READ from the device (firmware 40a3f6b). The device answers on
+// the same t:cfg frame a change produces -- one parameter per frame, a few per
+// publish cycle for getall -- and nano_ingest writes each into
+// nano_param_values. getall is logged with pid '*'. The device also dumps every
+// parameter by itself each time it comes online.
 // Validates against nano_registry (Cloud-settable RW or WO), guards P-802
 // (moves electrolyser current — needs confirm:true), logs to nano_commands
 // (pending, then sent once published), publishes the /cmd frame. The
@@ -50,7 +56,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { device_id, verb, pid, value, confirm } = body || {};
 
-    if (!device_id || !['set', 'stop', 'start'].includes(verb)) {
+    if (!device_id || !['set', 'stop', 'start', 'get', 'getall'].includes(verb)) {
       return NextResponse.json({ success: false, error: 'device_id and a valid verb are required' }, { status: 400 });
     }
 
@@ -67,6 +73,19 @@ export async function POST(request: NextRequest) {
       payload = { cmd: 'stop' }; rpid = 'P-1101'; rval = 'Stop';
     } else if (verb === 'start') {
       payload = { cmd: 'start' }; rpid = 'P-1101'; rval = 'Run';
+    } else if (verb === 'getall') {
+      payload = { cmd: 'getall' }; rpid = '*';
+    } else if (verb === 'get') {
+      if (!pid) {
+        return NextResponse.json({ success: false, error: "'get' needs pid" }, { status: 400 });
+      }
+      // Reads are not limited to cloud-settable parameters: RO measured values
+      // and write-only ones (returned as ***) are just as readable.
+      const known = await query(`SELECT 1 FROM nano_registry WHERE pid = $1`, [pid]);
+      if (known.rowCount === 0) {
+        return NextResponse.json({ success: false, error: `Unknown P-ID ${pid}` }, { status: 400 });
+      }
+      payload = { cmd: 'get', id: pid }; rpid = pid;
     } else {
       if (!pid || value === undefined || value === null) {
         return NextResponse.json({ success: false, error: "'set' needs pid and value" }, { status: 400 });
@@ -96,7 +115,7 @@ export async function POST(request: NextRequest) {
       payload = { cmd: 'set', id: pid, val: rval };
     }
 
-    if (DANGEROUS.has(rpid) && !confirm) {
+    if (verb === 'set' && DANGEROUS.has(rpid) && !confirm) {
       return NextResponse.json(
         { success: false, error: `${rpid} changes live electrolyser current — resend with confirm:true`, needsConfirm: true },
         { status: 409 }

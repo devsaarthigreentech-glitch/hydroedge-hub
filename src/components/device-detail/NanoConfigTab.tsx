@@ -57,6 +57,7 @@ export function NanoConfigTab({ device }: { device: Device }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
+  const [reading, setReading] = useState(false);
   const [log, setLog] = useState<CmdLog[]>([]);
   const [showLog, setShowLog] = useState(!isMobile);
 
@@ -108,6 +109,27 @@ export function NanoConfigTab({ device }: { device: Device }) {
     if (!data.success) { alert(`${pid}: ${data.error}`); return false; }
     return true;
   }, [device.id]);
+
+  // Ask the device for every parameter. It answers a few per publish cycle,
+  // so values land over several seconds; refresh while they arrive. The device
+  // also sends the full set on its own each time it comes online.
+  const readAll = useCallback(async () => {
+    setReading(true);
+    try {
+      const res = await fetch("/api/nano/command", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: device.id, verb: "getall" }),
+      });
+      const data = await res.json();
+      if (!data.success) { alert(data.error || "Read request failed"); return; }
+      await loadLog();
+      for (const ms of [3000, 8000, 15000, 30000]) setTimeout(loadConfig, ms);
+    } catch {
+      alert("Network error");
+    } finally {
+      setReading(false);
+    }
+  }, [device.id, loadConfig, loadLog]);
 
   const saveAll = useCallback(async () => {
     setSending(true);
@@ -204,6 +226,10 @@ export function NanoConfigTab({ device }: { device: Device }) {
           <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{search ? `Search: "${search}"` : selected || "Config"}</span>
           <span style={{ fontSize: 11, color: C.dim }}>{visibleParams.length} params</span>
           <div style={{ flex: 1 }} />
+          <button onClick={readAll} disabled={reading} style={{ ...btn(false), opacity: reading ? 0.6 : 1 }}
+            title="Ask the device to report every parameter. Values arrive over the next few seconds. The device also does this on its own each time it connects.">
+            {reading ? "Requesting…" : "↻ Read from device"}
+          </button>
           {isMobile && (
             <button onClick={() => setShowLog((v) => !v)} style={btn(showLog)}>Log {log.length ? `(${log.length})` : ""}</button>
           )}
