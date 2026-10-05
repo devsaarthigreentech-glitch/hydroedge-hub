@@ -109,6 +109,16 @@ export function NanoCommandsTab({ device }: { device: Device }) {
     send({ verb }, verb);
   };
 
+  const doReboot = async () => {
+    const ok = await confirm({
+      title: "REBOOT?",
+      message: `Restart ${device.device_name || device.imei}? It drops offline for about a minute while it reconnects. The stop line is undriven for about a second during the restart.`,
+      confirmLabel: "Reboot", danger: true,
+    });
+    if (!ok) return;
+    send({ verb: "reboot", confirm: true }, "reboot");
+  };
+
   const doSet = (pid: string) => {
     const v = vals[pid];
     if (v === undefined || v === "") { alert("Enter a value first"); return; }
@@ -148,6 +158,12 @@ export function NanoCommandsTab({ device }: { device: Device }) {
             <span style={{ fontSize: 22 }}>■</span>
             {busy === "stop" ? "Sending…" : "STOP"}
             <span style={{ fontSize: 10, color: C.faint, fontWeight: 400 }}>P-1101 · Stop (latching)</span>
+          </button>
+          <button onClick={doReboot} disabled={!!busy}
+            style={{ gridColumn: "1 / -1", padding: "12px", borderRadius: 12, border: `1px solid rgba(251,191,36,0.4)`, background: "rgba(251,191,36,0.08)", color: C.amber, fontSize: 13, fontWeight: 700, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>↻</span>
+            {busy === "reboot" ? "Sending…" : "REBOOT"}
+            <span style={{ fontSize: 10, color: C.faint, fontWeight: 400 }}>restarts ~4 s after the ack · needs firmware 4b74d6a</span>
           </button>
         </div>
 

@@ -486,6 +486,19 @@ class DB:
         val = payload.get("val")
         res = payload.get("res")
         ts = payload.get("ts")
+        if pid == "reboot":
+            # Ack of {"cmd":"reboot"} (firmware 4b74d6a): "rebooting", or a nack
+            # reason. Not a parameter, so it only closes the reboot command.
+            with self._cur() as cur:
+                cur.execute("""
+                    UPDATE nano_commands SET status=%s, result_reason=%s, resolved_at=now()
+                     WHERE id = (SELECT id FROM nano_commands
+                                  WHERE device_id=%s AND verb='reboot' AND status IN ('pending','sent')
+                                  ORDER BY sent_at DESC LIMIT 1);
+                """, ("ok" if res == "rebooting" else "nack", res, device_id))
+                correlated = cur.rowcount
+            self.conn.commit()
+            return pid, res, correlated
         with self._cur() as cur:
             cur.execute(PARAM_UPSERT, (
                 device_id, pid,
