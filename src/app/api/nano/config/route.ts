@@ -68,7 +68,10 @@ export async function GET(request: NextRequest) {
         auth_req: r.auth_req,
         notes: r.notes,
         cloud_settable: cloudSettable,
-        current_value: r.current_text,
+        // Older ingest stored JSON booleans as Python's "True"/"False", which
+        // matches neither dropdown option; show the device's own spelling.
+        current_value: r.data_type === 'bool' && typeof r.current_text === 'string'
+          ? r.current_text.toLowerCase() : r.current_text,
         current_res: r.current_res,
         current_ts: r.current_ts,
         current_source: r.current_source,

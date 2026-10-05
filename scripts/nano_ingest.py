@@ -259,6 +259,15 @@ def _num(v):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def _text(v):
+    """Value as the device spelled it: JSON true/false, not Python True/False."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
 def _same_value(wanted, got):
     """Does a reported t:cfg value confirm a commanded one? Lenient on
     representation (the device may print 12 as 12.0, a bool as true), strict on
@@ -502,7 +511,7 @@ class DB:
         with self._cur() as cur:
             cur.execute(PARAM_UPSERT, (
                 device_id, pid,
-                None if val is None else str(val), _num(val),
+                _text(val), _num(val),
                 res, payload.get("src"), ts, ts_to_utc(ts)))
             correlated = self._close_command(cur, device_id, pid, val, res)
         self.conn.commit()
