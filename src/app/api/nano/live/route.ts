@@ -54,6 +54,9 @@ const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen
   { col: 'ota_state', pid: 'P-4123', conditional: false, gen: 'v3' },
   { col: 'ota_progress_pct', pid: 'P-4124', conditional: true, gen: 'v3' },
   { col: 'ota_last_result', pid: 'P-4125', conditional: true, gen: 'v3' },
+  { col: 'rs485_ok_count', pid: 'P-5506', conditional: true, gen: 'v3' },
+  { col: 'rs485_err_count', pid: 'P-5507', conditional: true, gen: 'v3' },
+  { col: 'rs485_last_result', pid: 'P-5508', conditional: true, gen: 'v3' },
   { col: 'ps_overtemp', pid: 'P-4099', conditional: false, gen: 'gen2' },
   { col: 'active_bearer', pid: 'P-4100', conditional: false, gen: 'both' },
   { col: 'rssi', pid: 'P-4101', conditional: false, gen: 'both' },
@@ -104,6 +107,7 @@ export async function GET(request: NextRequest) {
          s.electrolyser_temp, s.temp_present, s.thermal_lockout,
          s.jacket_on, s.jacket_fault, s.rcs_zone, s.rcs_reason,
          s.ota_state, s.ota_progress_pct, s.ota_last_result, s.plant_producing,
+         s.rs485_ok_count, s.rs485_err_count, s.rs485_last_result,
          s.last_lat, s.last_lon, s.gps_fix, s.gps_sat,
          s.active_faults, s.d AS raw_d
        FROM devices d

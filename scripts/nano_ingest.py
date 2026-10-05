@@ -124,6 +124,9 @@ V3_CONDITIONAL = {
     "P-5251": "rcs_reason",            # auto-RCS active
     "P-4124": "ota_progress_pct",      # OTA job running
     "P-4125": "ota_last_result",       # after an OTA job
+    "P-5506": "rs485_ok_count",        # RS485 bus active (migration 018)
+    "P-5507": "rs485_err_count",
+    "P-5508": "rs485_last_result",
 }
 PID_COL = {**ALWAYS, **CONDITIONAL, **V3_ALWAYS, **V3_CONDITIONAL}
 
@@ -143,6 +146,7 @@ STATE_COLS = [
     "jacket_on", "jacket_fault", "rcs_zone", "rcs_reason",
     "ota_state", "ota_progress_pct", "ota_last_result",
     "plant_producing",
+    "rs485_ok_count", "rs485_err_count", "rs485_last_result",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
     "active_faults", "d",
 ]

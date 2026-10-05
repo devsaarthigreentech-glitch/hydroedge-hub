@@ -59,6 +59,8 @@ const GROUPS: Group[] = [
     pids: ["P-4100", "P-4101"] },
   { title: "Firmware Update (OTA)", icon: "⬇️", color: "#475569", bg: "#f8fafc",
     pids: ["P-4123", "P-4124", "P-4125"] },
+  { title: "RS485 / Modbus", icon: "🔌", color: "#0d9488", bg: "#f0fdfa",
+    pids: ["P-5506", "P-5507", "P-5508"] },
   { title: "Engine (CAN / Modbus)", icon: "🚛", color: "#7c3aed", bg: "#f5f3ff",
     pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117"] },
 ];

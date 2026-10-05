@@ -92,6 +92,9 @@ export const PID_META: Record<string, PidMeta> = {
   'P-4123': { name: 'OTA State' },
   'P-4124': { name: 'OTA Progress', unit: '%', conditional: true },
   'P-4125': { name: 'OTA Last Result', conditional: true },
+  'P-5506': { name: 'RS485 Transactions OK', conditional: true },
+  'P-5507': { name: 'RS485 Errors', conditional: true },
+  'P-5508': { name: 'RS485 Last Result', conditional: true },
 };
 
 const V3_LEVEL_NAMES: Record<string, string> = {
