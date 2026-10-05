@@ -39,6 +39,10 @@ const SECTIONS: Array<{ name: string; icon: string; cats: string[] }> = [
   { name: "Service & Time", icon: "🛠️", cats: ["Service / Runtime Counters", "Time / RTC", "OTA / Firmware Update", "Recovery / Retry Policy"] },
 ];
 
+// NanoV3 on/off switches (writable, persisted bools in config_table.c). Shown in
+// the feature-flag truth table; a PID not yet in nano_registry is skipped.
+const FLAG_PIDS = ["P-515", "P-609", "P-1303", "P-1306", "P-1501", "P-4200", "P-4300", "P-5101", "P-5110", "P-5400", "P-5500"];
+
 const C = {
   railBg: "#151515", rowBg: "#1a1a1a", border: "#2a2a2a", field: "#111",
   text: "#e2e8f0", dim: "#6b7280", faint: "#525252",
@@ -60,6 +64,7 @@ export function NanoConfigTab({ device }: { device: Device }) {
   const [reading, setReading] = useState(false);
   const [log, setLog] = useState<CmdLog[]>([]);
   const [showLog, setShowLog] = useState(!isMobile);
+  const [showFlags, setShowFlags] = useState(false);
 
   const catMap = useMemo(() => {
     const m: Record<string, Category> = {};
@@ -155,6 +160,11 @@ export function NanoConfigTab({ device }: { device: Device }) {
     return list;
   }, [search, selected, catMap, categories, editableOnly]);
 
+  const flags = useMemo(
+    () => categories.flatMap((c) => c.params).filter((p) => FLAG_PIDS.includes(p.pid)),
+    [categories]
+  );
+
   const statusColor = (s: string) =>
     s === "ok" ? C.green : s === "nack" || s === "failed" ? C.red : s === "sent" ? "#60a5fa" : C.amber;
 
@@ -223,9 +233,13 @@ export function NanoConfigTab({ device }: { device: Device }) {
 
         {/* Toolbar */}
         <div style={{ height: 46, background: C.rowBg, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", padding: "0 14px", gap: 10, flexShrink: 0 }}>
-          <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{search ? `Search: "${search}"` : selected || "Config"}</span>
-          <span style={{ fontSize: 11, color: C.dim }}>{visibleParams.length} params</span>
+          <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{showFlags ? "Feature flags" : search ? `Search: "${search}"` : selected || "Config"}</span>
+          <span style={{ fontSize: 11, color: C.dim }}>{showFlags ? `${flags.length} switches` : `${visibleParams.length} params`}</span>
           <div style={{ flex: 1 }} />
+          <button onClick={() => setShowFlags((v) => !v)} style={btn(showFlags)}
+            title="Truth table of the on/off switches: which are on by default and which are off.">
+            Feature flags
+          </button>
           <button onClick={readAll} disabled={reading} style={{ ...btn(false), opacity: reading ? 0.6 : 1 }}
             title="Ask the device to report every parameter. Values arrive over the next few seconds. The device also does this on its own each time it connects.">
             {reading ? "Requesting…" : "↻ Read from device"}
@@ -242,12 +256,13 @@ export function NanoConfigTab({ device }: { device: Device }) {
 
         {/* Params */}
         <div style={{ flex: 1, overflow: "auto", padding: "10px 14px" }}>
-          {visibleParams.length === 0 && (
+          {showFlags && <FlagTable flags={flags} />}
+          {!showFlags && visibleParams.length === 0 && (
             <div style={{ padding: 40, textAlign: "center", color: C.faint, fontSize: 13 }}>
               {editableOnly ? "No editable params here — untick “Editable only” to see read-only values." : "No params."}
             </div>
           )}
-          {visibleParams.map((p) => (
+          {!showFlags && visibleParams.map((p) => (
             <ParamRow key={p.pid} p={p} value={edits[p.pid] ?? (p.access === "WO" ? "" : (p.current_value ?? p.default_value ?? ""))} changed={changed.has(p.pid)}
               onChange={(v) => setEdit(p.pid, v)} onSet={async () => { const ok = await sendOne(p.pid, edits[p.pid] ?? (p.current_value ?? "")); if (ok) { setChanged((s) => { const n = new Set(s); n.delete(p.pid); return n; }); loadLog(); setTimeout(loadConfig, 1500); } }} />
           ))}
@@ -279,6 +294,48 @@ export function NanoConfigTab({ device }: { device: Device }) {
 
 function btn(active: boolean): React.CSSProperties {
   return { background: active ? C.accentBg : "transparent", border: `1px solid ${active ? C.accentBd : C.border}`, borderRadius: 6, padding: "5px 10px", color: active ? "#c4b5fd" : C.dim, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+}
+
+function FlagTable({ flags }: { flags: Param[] }) {
+  const cell: React.CSSProperties = { padding: "7px 10px", fontSize: 12, borderBottom: `1px solid ${C.border}`, textAlign: "left" };
+  const groups: Array<{ title: string; hint: string; rows: Param[] }> = [
+    { title: "On by default", hint: "Active out of the box. Set false to shut down.", rows: flags.filter((p) => p.default_value === "true") },
+    { title: "Off by default", hint: "Dormant out of the box. Set true to activate.", rows: flags.filter((p) => p.default_value !== "true") },
+  ];
+  return (
+    <div>
+      {groups.map((g) => (
+        <div key={g.title} style={{ marginBottom: 18 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{g.title} <span style={{ color: C.dim, fontWeight: 400, fontSize: 11 }}>· {g.hint}</span></div>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 6, background: C.rowBg, border: `1px solid ${C.border}`, borderRadius: 8 }}>
+            <thead>
+              <tr style={{ color: C.dim, fontSize: 10, textTransform: "uppercase" }}>
+                <th style={cell}>Feature</th><th style={cell}>PID</th><th style={cell}>Default</th><th style={cell}>Device now</th><th style={cell}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {g.rows.length === 0 && <tr><td style={{ ...cell, color: C.faint }} colSpan={5}>None</td></tr>}
+              {g.rows.map((p) => {
+                const def = p.default_value === "true" ? "true" : "false";
+                const known = p.current_value !== null && p.current_value !== undefined;
+                const same = known && p.current_value === def;
+                return (
+                  <tr key={p.pid} title={p.description || undefined}>
+                    <td style={{ ...cell, color: C.text, fontWeight: 600 }}>{p.name}</td>
+                    <td style={{ ...cell, fontFamily: "monospace", color: "#93c5fd" }}>{p.pid}</td>
+                    <td style={{ ...cell, fontFamily: "monospace", color: def === "true" ? C.green : C.dim }}>{def}</td>
+                    <td style={{ ...cell, fontFamily: "monospace", color: known ? "#93c5fd" : C.faint }}>{known ? p.current_value : "—"}</td>
+                    <td style={{ ...cell, color: !known ? C.faint : same ? C.dim : C.amber }}>{!known ? "not read yet" : same ? "factory default" : "changed"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
+      <div style={{ fontSize: 10, color: C.faint }}>Change a switch from its category in Config. Read-only status flags and the OTA trigger are not listed.</div>
+    </div>
+  );
 }
 
 function ParamRow({ p, value, changed, onChange, onSet }: { p: Param; value: string; changed: boolean; onChange: (v: string) => void; onSet: () => void; }) {
