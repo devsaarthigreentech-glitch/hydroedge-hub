@@ -143,6 +143,8 @@ export async function GET(request: NextRequest) {
       success: false,
       error: "Pass ?to=your@email.com to send a test email",
       config: {
+        transport: process.env.N8N_EMAIL_WEBHOOK_URL ? "n8n webhook → Gmail API" : "SMTP",
+        N8N_EMAIL_WEBHOOK_SECRET: process.env.N8N_EMAIL_WEBHOOK_SECRET ? "✅ Set" : "❌ Missing",
         GMAIL_USER: process.env.GMAIL_USER ? "✅ Set" : "❌ Missing",
         GMAIL_APP_PASSWORD: process.env.GMAIL_APP_PASSWORD ? "✅ Set" : "❌ Missing",
         GMAIL_FROM: process.env.GMAIL_FROM || "(not set — will use GMAIL_USER)",
@@ -157,7 +159,8 @@ export async function GET(request: NextRequest) {
     message: result.success
       ? `Test email sent to ${to}`
       : `Failed: ${result.error}`,
-    from: process.env.GMAIL_FROM || process.env.GMAIL_USER,
+    from: process.env.SMTP_FROM || process.env.GMAIL_FROM || process.env.GMAIL_USER,
+    transport: process.env.N8N_EMAIL_WEBHOOK_URL ? "n8n" : "smtp",
   });
 }
 

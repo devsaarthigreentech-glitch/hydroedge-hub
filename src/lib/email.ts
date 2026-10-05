@@ -545,10 +545,22 @@
 // </div>`;
 // }
 import nodemailer from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer";
 
 // ============================================================================
 // Email transporter
 // ============================================================================
+
+// Preferred path: hand the finished message to an n8n webhook, which passes it
+// to the Gmail API over HTTPS (443) using ajinkya@'s Gmail credential. Port 443
+// is the one thing DigitalOcean cannot block, so this survives the SMTP block
+// described below. The app still builds the full MIME message itself, so the
+// From alias (notifications@), CC and HTML are exactly what SMTP would send —
+// n8n only forwards the raw bytes.
+//
+// When N8N_EMAIL_WEBHOOK_URL is unset, the SMTP transporter below is used.
+const N8N_EMAIL_WEBHOOK_URL = process.env.N8N_EMAIL_WEBHOOK_URL || "";
+const N8N_EMAIL_WEBHOOK_SECRET = process.env.N8N_EMAIL_WEBHOOK_SECRET || "";
 
 // The relay is configurable because the standard mail ports are not reliably
 // reachable from this host. DigitalOcean blocks outbound 25, 465 and 587 —
@@ -564,7 +576,12 @@ const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
 const SMTP_USER = process.env.SMTP_USER || process.env.GMAIL_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || "";
 
-export const smtpConfigured = !!SMTP_USER && !!SMTP_PASS;
+const smtpConfigured = !!SMTP_USER && !!SMTP_PASS;
+const useN8n = !!N8N_EMAIL_WEBHOOK_URL;
+
+export const emailConfigured = useN8n || smtpConfigured;
+const NOT_CONFIGURED_ERROR =
+  "Email not configured: set N8N_EMAIL_WEBHOOK_URL, or SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD)";
 
 const transporter = nodemailer.createTransport({
   host: SMTP_HOST,
@@ -581,6 +598,46 @@ const transporter = nodemailer.createTransport({
 
 const FROM_ADDRESS = process.env.SMTP_FROM || process.env.GMAIL_FROM || SMTP_USER;
 const FROM_NAME = "SGT Hydroedge Alerts";
+
+// ============================================================================
+// Deliver one message through whichever transport is configured
+// ============================================================================
+
+type OutgoingMail = {
+  from: string;
+  to: string;
+  cc?: string;
+  subject: string;
+  html: string;
+};
+
+async function deliver(mail: OutgoingMail): Promise<void> {
+  if (!useN8n) {
+    await transporter.sendMail(mail);
+    return;
+  }
+
+  // Gmail's API wants the whole RFC 822 message, base64url-encoded.
+  const raw = (await new MailComposer(mail).compile().build()).toString("base64url");
+
+  const res = await fetch(N8N_EMAIL_WEBHOOK_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(N8N_EMAIL_WEBHOOK_SECRET ? { "X-Webhook-Secret": N8N_EMAIL_WEBHOOK_SECRET } : {}),
+    },
+    body: JSON.stringify({ raw }),
+    // Same reasoning as the SMTP timeouts: fail in seconds, not minutes.
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  // The n8n workflow responds only after the Gmail call finishes, so a failed
+  // send comes back as a non-2xx here rather than a false success.
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).slice(0, 300);
+    throw new Error(`n8n email webhook returned ${res.status}${body ? `: ${body}` : ""}`);
+  }
+}
 
 // Support team — always CC'd
 const SUPPORT_EMAILS = (process.env.SUPPORT_EMAILS || "ajinkya@sgthydroedge.com,mangesh@sgthydroedge.com")
@@ -628,8 +685,8 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
   ccTo: string[];
   error?: string;
 }> {
-  if (!smtpConfigured) {
-    return { success: false, sentTo: [], ccTo: [], error: "SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD) not configured" };
+  if (!emailConfigured) {
+    return { success: false, sentTo: [], ccTo: [], error: NOT_CONFIGURED_ERROR };
   }
 
   const toList = [...new Set(data.to.filter(Boolean))];
@@ -655,7 +712,7 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
     : `🟡 ${warnCount} Warning${warnCount > 1 ? "s" : ""} — ${data.customerName}`;
 
   try {
-    await transporter.sendMail({
+    await deliver({
       from: `"${FROM_NAME}" <${FROM_ADDRESS}>`,
       to: toList.join(", "),
       cc: ccList.length > 0 ? ccList.join(", ") : undefined,
@@ -693,8 +750,8 @@ export async function sendHtmlEmail(data: HtmlEmailData): Promise<{
   ccTo: string[];
   error?: string;
 }> {
-  if (!smtpConfigured) {
-    return { success: false, sentTo: [], ccTo: [], error: "SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD) not configured" };
+  if (!emailConfigured) {
+    return { success: false, sentTo: [], ccTo: [], error: NOT_CONFIGURED_ERROR };
   }
 
   const toList = [...new Set(data.to.filter(Boolean))];
@@ -707,7 +764,7 @@ export async function sendHtmlEmail(data: HtmlEmailData): Promise<{
   }
 
   try {
-    await transporter.sendMail({
+    await deliver({
       from: `"${data.fromName || FROM_NAME}" <${FROM_ADDRESS}>`,
       to: toList.join(", "),
       cc: ccList.length > 0 ? ccList.join(", ") : undefined,
@@ -726,12 +783,12 @@ export async function sendHtmlEmail(data: HtmlEmailData): Promise<{
 // ============================================================================
 
 export async function sendTestEmail(to: string): Promise<{ success: boolean; error?: string }> {
-  if (!smtpConfigured) {
-    return { success: false, error: "SMTP_USER and SMTP_PASS (or GMAIL_USER / GMAIL_APP_PASSWORD) not configured" };
+  if (!emailConfigured) {
+    return { success: false, error: NOT_CONFIGURED_ERROR };
   }
 
   try {
-    await transporter.sendMail({
+    await deliver({
       from: `"${FROM_NAME}" <${FROM_ADDRESS}>`,
       to,
       subject: "✅ SGT Hydroedge — Email Notifications Working",
