@@ -142,7 +142,7 @@ do_verify() {
   echo "  prod   : $p"
   [ "$a" = "$p" ] || die "counts differ by $(( p - a )) — do NOT swap. Send this output over."
   printf 'SNAP_MAX=%s\nSNAP_COUNT=%s\n' "$snap_max" "$a" > "$STATE"
-  echo "$(date -Is) verified. Next: stop ingest, then $0 swap '<cutoff>'"
+  echo "$(date -Is) verified. Next: $0 swap '<cutoff>' (ingest can keep running)"
 }
 
 # Loads rows >= CUTOFF with id <= TOP_MAX (the highest id in the old table).
