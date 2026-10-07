@@ -48,7 +48,9 @@ The password is in `/root/.pgpass` on prod and in prod's `.env.local` as
 - **Only `io_records`.** ~116.7 M rows, 26 GB. **No `devices`, no `gps_records`.**
   So you can't look a device up by IMEI there. Use the UUID from prod. Trips,
   idle and GPS distance can't be computed from it.
-- Same columns as prod: `id, device_id, gps_record_id, io_id, io_value, timestamp`.
+- Same 10 columns as prod (confirmed 2026-10-07): `id, gps_record_id, device_id,
+  timestamp, io_id, io_name, io_value, io_value_text, unit, io_type`. The app only
+  reads the first six, but any copy must carry all ten.
 - Indexes: `io_records_pkey (id)`, `idx_io_device_io_id (device_id, io_id)`,
   `idx_io_device_io_timestamp (device_id, io_id, timestamp DESC)`,
   `idx_io_device_timestamp (device_id, timestamp DESC)`, `idx_io_gps_record (gps_record_id)`.
@@ -200,8 +202,14 @@ Known-good values to verify against (0015, 2026-08-22): `distance_km 185.96`,
    - `verify`: exact count on both sides for `id <= max(id)` of the copy. Writes
      `/var/tmp/io_offload.state` only if they match.
    - `swap CUTOFF` (ingest stopped): refuses if inserts are still arriving, tops up
-     `id > SNAP_MAX`, re-checks, asks for typed `TRUNCATE`, empties prod, and reloads
-     rows `>= CUTOFF` from the staging table. `restore CUTOFF` redoes only the reload.
+     `id > SNAP_MAX`, re-checks, asks for typed `TRUNCATE`, records `TOP_MAX` (the
+     highest id at that moment) and empties prod. **Ingest restarts right after the
+     TRUNCATE.** The reload of rows `>= CUTOFF AND id <= TOP_MAX` runs alongside it,
+     since new rows get ids above `TOP_MAX`. `restore CUTOFF` redoes only the reload.
+   - Column list is read from `information_schema` and must match on both sides.
+     A hard-coded 6-column list would have silently dropped four columns.
+   - Ingest rate at the time: ~1.4 M rows/day (~200 MB/day on disk). A 30-day
+     cutoff keeps ~6 GB on prod, so retention has to become a recurring job.
 
    Why a staging table and not the archive's own `io_records`: no `CREATE DATABASE`
    right needed, no clash between prod ids and the archive's existing ids, a fast

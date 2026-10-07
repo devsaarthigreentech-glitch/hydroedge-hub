@@ -19,13 +19,14 @@
 #                     downtime. Run inside tmux.
 #   verify            exact row counts on both sides for the copied id range.
 #                     Slow (full scan), no downtime. Records the result.
-#   swap CUTOFF       DOWNTIME — stop ingest first. Copies rows written since
+#   swap CUTOFF       SHORT DOWNTIME — stop ingest first. Copies rows written since
 #                     the copy, re-checks, asks for typed confirmation,
-#                     TRUNCATEs prod io_records, loads rows >= CUTOFF back.
+#                     TRUNCATEs prod io_records (restart ingest right then),
+#                     then loads rows >= CUTOFF back alongside live ingest.
 #   restore CUTOFF    only the load-back step, if swap died after TRUNCATE.
 #
 # Nothing on prod is removed until 'swap', and swap refuses to run unless
-# 'verify' passed. Keep ingest stopped until swap/restore prints DONE.
+# 'verify' passed. Ingest only needs to be off from swap start to TRUNCATE.
 #
 # Archive login is the one the app uses (ARCHIVE_DB.md §2); the password comes
 # from /root/.pgpass. Override with ARCH_HOST / ARCH_USER / ARCH_DB if needed.
@@ -38,7 +39,6 @@ ARCH_USER=${ARCH_USER:-sgt_admin}
 ARCH_DB=${ARCH_DB:-sgt_hydroedge_archive}
 STAGE=io_records_prod
 STATE=/var/tmp/io_offload.state
-COLS="id, device_id, gps_record_id, io_id, io_value, timestamp"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -51,6 +51,19 @@ archv() { arch -At -c "$1"; }
 coldefs() {  # column name:type list for a table, one line
   echo "SELECT string_agg(column_name || ':' || data_type, ',' ORDER BY ordinal_position)
         FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$1'"
+}
+
+# Every column, read from prod and required to match the archive exactly, so a
+# copy can never silently drop one.
+check_cols() {
+  local p a
+  p=$(prodv "$(coldefs io_records)")
+  a=$(archv "$(coldefs io_records)")
+  [ -n "$p" ] && [ "$p" = "$a" ] || die "column mismatch
+  prod   : $p
+  archive: $a"
+  COLS=$(prodv "SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position)
+                FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'io_records'")
 }
 
 check_pk() {
@@ -74,17 +87,13 @@ load_state() {
 }
 
 do_check() {
-  local p a rows d
+  local rows d
   check_pk
   archv "SELECT 1" >/dev/null || die "cannot reach $ARCH_DB on $ARCH_HOST (check /root/.pgpass)"
   echo "Archive reachable: $ARCH_USER@$ARCH_HOST/$ARCH_DB"
 
-  p=$(prodv "$(coldefs io_records)")
-  a=$(archv "$(coldefs io_records)")
-  [ "$p" = "$a" ] || die "column mismatch
-  prod   : $p
-  archive: $a"
-  echo "Columns match: $p"
+  check_cols
+  echo "Columns match, all will be copied: $COLS"
 
   if [ "$(archv "SELECT to_regclass('public.$STAGE') IS NOT NULL")" = "t" ]; then
     echo "NOTE: $STAGE already exists on the archive ($(archv "SELECT count(*) FROM $STAGE") rows)."
@@ -103,6 +112,7 @@ do_check() {
 
 do_copy() {
   check_pk
+  check_cols
   [ "$(archv "SELECT to_regclass('public.$STAGE') IS NULL")" = "t" ] \
     || die "$STAGE already exists on the archive. If this is a retry after a failed copy, DROP TABLE $STAGE there first."
 
@@ -134,24 +144,31 @@ do_verify() {
   echo "$(date -Is) verified. Next: stop ingest, then $0 swap '<cutoff>'"
 }
 
+# Loads rows >= CUTOFF with id <= TOP_MAX (the highest id that existed at
+# TRUNCATE time). Ingest may already be running again: its new rows get ids
+# above TOP_MAX from the untouched sequence, so the two never overlap.
 do_restore() {
   local cutoff=$1 cur want got
-  cur=$(prodv "SELECT count(*) FROM io_records")
-  [ "$cur" = "0" ] || die "prod io_records has $cur rows; restore expects it empty (is ingest running?)"
-  want=$(archv "SELECT count(*) FROM $STAGE WHERE timestamp >= '$cutoff'")
-  echo "$(date -Is) loading $want rows (timestamp >= $cutoff) back into prod"
-  arch -c "\copy (SELECT $COLS FROM $STAGE WHERE timestamp >= '$cutoff' ORDER BY id) TO STDOUT" \
+  load_state
+  [ -n "${TOP_MAX:-}" ] || die "no TOP_MAX in $STATE — swap never reached TRUNCATE, nothing to restore"
+  check_cols
+  cur=$(prodv "SELECT count(*) FROM io_records WHERE id <= $TOP_MAX")
+  [ "$cur" = "0" ] || die "prod already has $cur rows with id <= $TOP_MAX — restore already ran (it is all-or-nothing)"
+  want=$(archv "SELECT count(*) FROM $STAGE WHERE id <= $TOP_MAX AND timestamp >= '$cutoff'")
+  echo "$(date -Is) loading $want rows (timestamp >= $cutoff) back into prod — ingest can run meanwhile"
+  arch -c "\copy (SELECT $COLS FROM $STAGE WHERE id <= $TOP_MAX AND timestamp >= '$cutoff' ORDER BY id) TO STDOUT" \
     | prod -c "\copy io_records ($COLS) FROM STDIN"
-  got=$(prodv "SELECT count(*) FROM io_records")
-  [ "$got" = "$want" ] || die "loaded $got rows, expected $want. Ingest must stay stopped; TRUNCATE io_records on prod and re-run restore."
+  got=$(prodv "SELECT count(*) FROM io_records WHERE id <= $TOP_MAX")
+  [ "$got" = "$want" ] || die "loaded $got rows, expected $want — send this output over"
   prod -c "ANALYZE io_records"
-  echo "$(date -Is) DONE: prod io_records now holds $got rows. Start ingest again."
+  echo "$(date -Is) DONE: reloaded $got rows."
   df -h /
 }
 
 do_swap() {
   local cutoff=$1 n1 n2 p_new a_new p_max a_max keep ans
   check_pk
+  check_cols
   load_state
 
   echo "Checking that nothing is still writing to io_records (15 s)..."
@@ -180,8 +197,10 @@ do_swap() {
   read -r -p "Type TRUNCATE to empty prod io_records and load the kept rows back: " ans
   [ "$ans" = "TRUNCATE" ] || die "aborted, nothing changed"
 
+  printf 'TOP_MAX=%s\n' "$p_max" >> "$STATE"
   prod -c "TRUNCATE io_records"
-  echo "$(date -Is) truncated."
+  echo
+  echo "$(date -Is) truncated. >>> START INGEST AGAIN NOW <<< (reload runs alongside it)"
   df -h /
   do_restore "$cutoff"
 }
