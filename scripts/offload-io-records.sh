@@ -5,8 +5,8 @@
 # Prod's 77 GB disk filled because io_records holds ~449 M rows / 63 GB.
 # This copies the WHOLE prod table into a staging table, io_records_prod, inside
 # the existing sgt_hydroedge_archive database (see ARCHIVE_DB.md), proves the
-# copy is complete, then empties prod's table and loads back only rows with
-# timestamp >= CUTOFF.
+# copy is complete, then replaces prod's table with an empty one and loads back
+# only rows with timestamp >= CUTOFF.
 #
 # io_records_prod is deliberately NOT the archive's io_records: it loads with no
 # indexes (fast), never collides with the archive's own ids, and is the place to
@@ -19,14 +19,14 @@
 #                     downtime. Run inside tmux.
 #   verify            exact row counts on both sides for the copied id range.
 #                     Slow (full scan), no downtime. Records the result.
-#   swap CUTOFF       SHORT DOWNTIME — stop ingest first. Copies rows written since
-#                     the copy, re-checks, asks for typed confirmation,
-#                     TRUNCATEs prod io_records (restart ingest right then),
-#                     then loads rows >= CUTOFF back alongside live ingest.
-#   restore CUTOFF    only the load-back step, if swap died after TRUNCATE.
+#   swap CUTOFF       NO DOWNTIME, ingest keeps running. Swaps in an empty
+#                     io_records, copies the frozen old table's tail to the
+#                     archive, re-checks, asks for typed DROP, drops the old
+#                     table (frees the disk), reloads rows >= CUTOFF.
+#   restore CUTOFF    only the reload step, if swap died after the DROP.
 #
-# Nothing on prod is removed until 'swap', and swap refuses to run unless
-# 'verify' passed. Ingest only needs to be off from swap start to TRUNCATE.
+# Nothing on prod is deleted until the typed DROP in 'swap', and swap refuses
+# to run unless 'verify' passed.
 #
 # Archive login is the one the app uses (ARCHIVE_DB.md §2); the password comes
 # from /root/.pgpass. Override with ARCH_HOST / ARCH_USER / ARCH_DB if needed.
@@ -39,6 +39,7 @@ ARCH_USER=${ARCH_USER:-sgt_admin}
 ARCH_DB=${ARCH_DB:-sgt_hydroedge_archive}
 STAGE=io_records_prod
 STATE=/var/tmp/io_offload.state
+FKFILE=/var/tmp/io_offload.fks.sql
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -144,63 +145,128 @@ do_verify() {
   echo "$(date -Is) verified. Next: stop ingest, then $0 swap '<cutoff>'"
 }
 
-# Loads rows >= CUTOFF with id <= TOP_MAX (the highest id that existed at
-# TRUNCATE time). Ingest may already be running again: its new rows get ids
-# above TOP_MAX from the untouched sequence, so the two never overlap.
+# Loads rows >= CUTOFF with id <= TOP_MAX (the highest id in the old table).
+# Ingest keeps running: its rows in the new table get ids above TOP_MAX from
+# the shared sequence, so the two never overlap.
 do_restore() {
   local cutoff=$1 cur want got
   load_state
-  [ -n "${TOP_MAX:-}" ] || die "no TOP_MAX in $STATE — swap never reached TRUNCATE, nothing to restore"
+  [ -n "${TOP_MAX:-}" ] || die "no TOP_MAX in $STATE — swap never reached the rename, nothing to restore"
+  [ "$(prodv "SELECT to_regclass('public.io_records_old') IS NULL")" = "t" ] \
+    || die "io_records_old still exists — finish 'swap' first"
   check_cols
   cur=$(prodv "SELECT count(*) FROM io_records WHERE id <= $TOP_MAX")
   [ "$cur" = "0" ] || die "prod already has $cur rows with id <= $TOP_MAX — restore already ran (it is all-or-nothing)"
   want=$(archv "SELECT count(*) FROM $STAGE WHERE id <= $TOP_MAX AND timestamp >= '$cutoff'")
-  echo "$(date -Is) loading $want rows (timestamp >= $cutoff) back into prod — ingest can run meanwhile"
+  echo "$(date -Is) loading $want rows (timestamp >= $cutoff) back into prod, alongside live ingest"
   arch -c "\copy (SELECT $COLS FROM $STAGE WHERE id <= $TOP_MAX AND timestamp >= '$cutoff' ORDER BY id) TO STDOUT" \
     | prod -c "\copy io_records ($COLS) FROM STDIN"
   got=$(prodv "SELECT count(*) FROM io_records WHERE id <= $TOP_MAX")
   [ "$got" = "$want" ] || die "loaded $got rows, expected $want — send this output over"
+
+  if [ -s "$FKFILE" ]; then
+    # NOT VALID: enforced for every new row, existing rows not re-scanned.
+    echo "$(date -Is) re-adding foreign keys"
+    prod < "$FKFILE"
+    rm -f "$FKFILE"
+  fi
   prod -c "ANALYZE io_records"
   echo "$(date -Is) DONE: reloaded $got rows."
   df -h /
 }
 
+# Refuse anything the rename swap would silently get wrong.
+swap_preflight() {
+  local v
+  v=$(prodv "SELECT string_agg(DISTINCT c.relname, ', ') FROM pg_depend d
+             JOIN pg_rewrite r ON r.oid = d.objid JOIN pg_class c ON c.oid = r.ev_class
+             WHERE d.refobjid = 'io_records'::regclass AND c.oid <> 'io_records'::regclass")
+  [ -z "$v" ] || die "views depend on io_records ($v) — they would stay bound to the old table"
+  v=$(prodv "SELECT string_agg(tgname, ', ') FROM pg_trigger WHERE tgrelid = 'io_records'::regclass AND NOT tgisinternal")
+  [ -z "$v" ] || die "io_records has triggers ($v), which CREATE TABLE LIKE does not copy"
+  v=$(prodv "SELECT string_agg(conname || ' on ' || conrelid::regclass::text, ', ') FROM pg_constraint
+             WHERE confrelid = 'io_records'::regclass AND contype = 'f'")
+  [ -z "$v" ] || die "other tables have foreign keys to io_records ($v)"
+  v=$(prodv "SELECT attidentity FROM pg_attribute WHERE attrelid = 'io_records'::regclass AND attname = 'id'")
+  [ -z "$v" ] || die "io_records.id is an identity column; LIKE would start a fresh sequence and reuse ids"
+  [ -n "$(prodv "SELECT pg_get_serial_sequence('io_records', 'id')")" ] \
+    || die "io_records.id has no owned sequence — check its default"
+}
+
+# No downtime: ingest keeps writing throughout.
+#   1. One short transaction renames io_records -> io_records_old and puts an
+#      empty clone (same columns, defaults, sequence, indexes, owner, grants)
+#      in its place. Ingest's next INSERT lands in the clone.
+#   2. io_records_old is now frozen, so its tail (id > SNAP_MAX) is copied to the
+#      archive and checked exactly.
+#   3. Typed confirmation, then io_records_old is dropped (frees the disk) and
+#      rows >= CUTOFF are loaded back into the live table.
+# Re-runnable: if io_records_old already exists, step 1 is skipped.
 do_swap() {
-  local cutoff=$1 n1 n2 p_new a_new p_max a_max keep ans
+  local cutoff=$1 seq owner grants p_new a_new p_max a_max keep ans i
   check_pk
   check_cols
   load_state
 
-  echo "Checking that nothing is still writing to io_records (15 s)..."
-  n1=$(prodv "SELECT n_tup_ins FROM pg_stat_user_tables WHERE relname = 'io_records'")
-  sleep 15
-  n2=$(prodv "SELECT n_tup_ins FROM pg_stat_user_tables WHERE relname = 'io_records'")
-  [ "$n1" = "$n2" ] || die "$(( n2 - n1 )) rows inserted in the last 15 s — stop the ingest services first"
+  if [ "$(prodv "SELECT to_regclass('public.io_records_old') IS NULL")" = "t" ]; then
+    swap_preflight
+    owner=$(prodv "SELECT quote_ident(pg_get_userbyid(relowner)) FROM pg_class WHERE oid = 'io_records'::regclass")
+    grants=$(prodv "SELECT string_agg(format('GRANT %s ON io_records_new TO %s;', a.privilege_type,
+                      CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(a.grantee)) END), ' ')
+                    FROM pg_class c, aclexplode(c.relacl) a
+                    WHERE c.oid = 'io_records'::regclass AND a.grantee <> c.relowner")
+    echo "$(date -Is) swapping in an empty io_records (ingest keeps running)"
+    for i in 1 2 3 4 5; do
+      if prod -c "BEGIN; SET LOCAL lock_timeout = '5s';
+                  CREATE TABLE io_records_new (LIKE io_records INCLUDING ALL);
+                  ALTER TABLE io_records_new OWNER TO $owner; $grants
+                  ALTER TABLE io_records RENAME TO io_records_old;
+                  ALTER TABLE io_records_new RENAME TO io_records;
+                  COMMIT;"; then
+        break
+      fi
+      [ "$i" = 5 ] && die "could not get the lock on io_records after 5 tries — nothing changed, try again"
+      echo "  lock busy, retrying ($i/5)"; sleep 3
+    done
+    sleep 2
+    echo "  new rows since swap: $(prodv "SELECT count(*) FROM io_records")"
+  else
+    echo "io_records_old already exists — resuming after the rename"
+  fi
+
+  p_max=$(prodv "SELECT coalesce(max(id), 0) FROM io_records_old")
+  { grep -v '^TOP_MAX=' "$STATE" || true; printf 'TOP_MAX=%s\n' "$p_max"; } > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"
 
   echo "$(date -Is) copying rows written since the copy (id > $SNAP_MAX) to the archive"
-  prod -c "\copy (SELECT $COLS FROM io_records WHERE id > $SNAP_MAX ORDER BY id) TO STDOUT" \
+  arch -c "DELETE FROM $STAGE WHERE id > $SNAP_MAX"   # makes a re-run safe
+  prod -c "\copy (SELECT $COLS FROM io_records_old WHERE id > $SNAP_MAX ORDER BY id) TO STDOUT" \
     | arch -c "\copy $STAGE ($COLS) FROM STDIN"
 
-  p_new=$(prodv "SELECT count(*) FROM io_records WHERE id > $SNAP_MAX")
+  p_new=$(prodv "SELECT count(*) FROM io_records_old WHERE id > $SNAP_MAX")
   a_new=$(archv "SELECT count(*) FROM $STAGE WHERE id > $SNAP_MAX")
-  p_max=$(prodv "SELECT coalesce(max(id), 0) FROM io_records")
   a_max=$(archv "SELECT coalesce(max(id), 0) FROM $STAGE")
   [ "$p_new" = "$a_new" ] && [ "$p_max" = "$a_max" ] \
-    || die "top-up mismatch (prod $p_new rows / max id $p_max, archive $a_new / $a_max). Nothing truncated."
+    || die "top-up mismatch (prod $p_new rows / max id $p_max, archive $a_new / $a_max). Nothing dropped; io_records_old kept."
   keep=$(archv "SELECT count(*) FROM $STAGE WHERE timestamp >= '$cutoff'")
 
   echo
-  echo "  archive $STAGE holds : $(( SNAP_COUNT + a_new )) rows (complete copy of prod)"
-  echo "  will keep on prod    : $keep rows (timestamp >= $cutoff)"
+  echo "  archive $STAGE holds : $(( SNAP_COUNT + a_new )) rows (complete copy of the old table)"
+  echo "  will reload on prod  : $keep rows (timestamp >= $cutoff)"
   echo "  will drop on prod    : $(( SNAP_COUNT + a_new - keep )) rows"
   echo
-  read -r -p "Type TRUNCATE to empty prod io_records and load the kept rows back: " ans
-  [ "$ans" = "TRUNCATE" ] || die "aborted, nothing changed"
+  read -r -p "Type DROP to delete io_records_old on prod and reload the kept rows: " ans
+  [ "$ans" = "DROP" ] || die "aborted. Ingest is writing to the new io_records; io_records_old is kept. Re-run swap to finish."
 
-  printf 'TOP_MAX=%s\n' "$p_max" >> "$STATE"
-  prod -c "TRUNCATE io_records"
-  echo
-  echo "$(date -Is) truncated. >>> START INGEST AGAIN NOW <<< (reload runs alongside it)"
+  prodv "SELECT string_agg(format('ALTER TABLE io_records ADD CONSTRAINT %I %s NOT VALID;', conname, pg_get_constraintdef(oid)), E'\n')
+         FROM pg_constraint WHERE conrelid = 'io_records_old'::regclass AND contype = 'f'" > "$FKFILE"
+  seq=$(prodv "SELECT pg_get_serial_sequence('io_records_old', 'id')")
+  # The sequence belongs to the old table's id column; move it or DROP takes it too.
+  prod -c "BEGIN;
+           ALTER SEQUENCE $seq OWNED BY io_records.id;
+           DROP TABLE io_records_old;
+           ALTER INDEX IF EXISTS io_records_new_pkey RENAME TO io_records_pkey;
+           COMMIT;"
+  echo "$(date -Is) io_records_old dropped."
   df -h /
   do_restore "$cutoff"
 }

@@ -201,11 +201,20 @@ Known-good values to verify against (0015, 2026-08-22): `distance_km 185.96`,
      downtime. Run in tmux.
    - `verify`: exact count on both sides for `id <= max(id)` of the copy. Writes
      `/var/tmp/io_offload.state` only if they match.
-   - `swap CUTOFF` (ingest stopped): refuses if inserts are still arriving, tops up
-     `id > SNAP_MAX`, re-checks, asks for typed `TRUNCATE`, records `TOP_MAX` (the
-     highest id at that moment) and empties prod. **Ingest restarts right after the
-     TRUNCATE.** The reload of rows `>= CUTOFF AND id <= TOP_MAX` runs alongside it,
-     since new rows get ids above `TOP_MAX`. `restore CUTOFF` redoes only the reload.
+   - `swap CUTOFF`: **no downtime, ingest keeps running.** Preflight refuses
+     dependent views, user triggers, inbound FKs, or an identity `id`. Then, in one
+     short transaction (5 s `lock_timeout`, 5 retries), it creates
+     `io_records_new (LIKE io_records INCLUDING ALL)` with the same owner and grants,
+     renames `io_records → io_records_old` and `io_records_new → io_records`.
+     Ingest's next INSERT lands in the empty table, and `id` keeps drawing from the
+     same sequence. The frozen `io_records_old` tail (`id > SNAP_MAX`) is copied and
+     checked exactly, `TOP_MAX` is recorded, and after a typed `DROP` the sequence is
+     re-owned to the new table, `io_records_old` is dropped (frees the disk), and
+     rows `>= CUTOFF AND id <= TOP_MAX` are reloaded. Outbound FKs are re-added
+     `NOT VALID` after the reload. Re-runnable: it resumes if `io_records_old`
+     exists. `restore CUTOFF` redoes only the reload.
+   - Secondary indexes on the new table get auto names (`io_records_new_*_idx`),
+     and only the pkey is renamed back. Nothing in the app references index names.
    - Column list is read from `information_schema` and must match on both sides.
      A hard-coded 6-column list would have silently dropped four columns.
    - Ingest rate at the time: ~1.4 M rows/day (~200 MB/day on disk). A 30-day
