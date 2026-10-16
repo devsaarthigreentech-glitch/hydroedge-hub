@@ -3233,12 +3233,14 @@ export async function POST(request: NextRequest) {
         // dark, the less often repeating it tells anyone anything new.
         const noDataCooldown = noDataCooldownMinutes(dataAgeMs);
 
-        // Cooldown check
+        // Cooldown check. Only a delivered email starts the cooldown — a failed
+        // attempt (the SMTP outage) must not silence the alert for days.
         let shouldSkip = false;
         if (!isTestMode) {
           const recentCheck = await client.query(`
             SELECT id FROM notification_log
             WHERE device_id = $1 AND alert_id = $2 AND resolved_at IS NULL
+              AND email_status = 'sent'
               AND sent_at > NOW() - INTERVAL '1 minute' * $3
             LIMIT 1
           `, [device.id, noDataAlarm.id, noDataCooldown]);
@@ -3327,6 +3329,7 @@ export async function POST(request: NextRequest) {
           const recentCheck = await client.query(`
             SELECT id FROM notification_log
             WHERE device_id = $1 AND alert_id = $2 AND resolved_at IS NULL
+              AND email_status = 'sent'
               AND sent_at > NOW() - INTERVAL '1 minute' * $3
             LIMIT 1
           `, [device.id, alarm.id, device.cooldown_minutes]);
