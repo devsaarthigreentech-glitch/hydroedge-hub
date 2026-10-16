@@ -18,25 +18,28 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "gmailOAuth2",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ { \"raw\": $json.body.raw } }}",
-        "options": {}
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.body.to }}",
+        "subject": "={{ $json.body.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.body.html }}",
+        "options": {
+          "appendAttribution": false,
+          "ccList": "={{ $json.body.cc }}",
+          "senderName": "={{ $json.body.fromName }}"
+        }
       },
-      "id": "6b1f2c1e-0d5a-4f7e-9b1a-1a2b3c4d5e02",
-      "name": "Gmail API send",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "6b1f2c1e-0d5a-4f7e-9b1a-1a2b3c4d5e03",
+      "name": "Send a message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
       "position": [260, 0]
     }
   ],
   "connections": {
     "Webhook": {
-      "main": [[{ "node": "Gmail API send", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Send a message", "type": "main", "index": 0 }]]
     }
   },
   "settings": { "executionOrder": "v1" }

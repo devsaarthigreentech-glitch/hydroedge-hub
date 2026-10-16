@@ -617,8 +617,15 @@ async function deliver(mail: OutgoingMail): Promise<void> {
     return;
   }
 
-  // Gmail's API wants the whole RFC 822 message, base64url-encoded.
+  // Two shapes in one payload so either n8n setup works:
+  //   raw          — the whole RFC 822 message, base64url-encoded, for an HTTP
+  //                  Request node posting to Gmail's messages/send. Keeps the
+  //                  From alias exactly.
+  //   to/cc/...    — plain fields for n8n's own Gmail node. That node sends
+  //                  from the credential's default address and only lets you
+  //                  set the display name, hence fromName.
   const raw = (await new MailComposer(mail).compile().build()).toString("base64url");
+  const fromName = mail.from.match(/^"([^"]*)"/)?.[1] || FROM_NAME;
 
   const res = await fetch(N8N_EMAIL_WEBHOOK_URL, {
     method: "POST",
@@ -626,7 +633,15 @@ async function deliver(mail: OutgoingMail): Promise<void> {
       "Content-Type": "application/json",
       ...(N8N_EMAIL_WEBHOOK_SECRET ? { "X-Webhook-Secret": N8N_EMAIL_WEBHOOK_SECRET } : {}),
     },
-    body: JSON.stringify({ raw }),
+    body: JSON.stringify({
+      raw,
+      from: mail.from,
+      fromName,
+      to: mail.to,
+      cc: mail.cc || "",
+      subject: mail.subject,
+      html: mail.html,
+    }),
     // Same reasoning as the SMTP timeouts: fail in seconds, not minutes.
     signal: AbortSignal.timeout(30_000),
   });
