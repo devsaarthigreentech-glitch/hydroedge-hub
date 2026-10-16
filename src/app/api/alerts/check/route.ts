@@ -2641,16 +2641,25 @@
 // }
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
-import { sendBatchAlertEmail, DeviceAlert } from "@/lib/email";
+import {
+  recordEpisodes, dispatchImmediate, dispatchCustomerDigests, dispatchSupportDigest,
+  safeTimeZone, DetectedAlarm, DeviceMeta, CustomerContext,
+} from "@/lib/alert-dispatch";
 
 // ============================================================================
-// POST /api/alerts/check — Scan GreenX devices, send grouped alerts by customer
+// POST /api/alerts/check — Scan GreenX devices, record faults, send what is due
 // GET  /api/alerts/check — View alert history
 //
+// Every scan (cron, every 5 minutes):
+//   1. evaluates the alarms for each device from its latest telemetry
+//   2. records them as episodes in alert_episodes (open / still seen / cleared)
+//   3. hands over to src/lib/alert-dispatch.ts, which decides what to send:
+//        urgent alerts on detection, the customer's daily summary at 09:00 in
+//        their timezone, and the 6-hourly new-fault digest to support
+//
 // Recency rules:
-//   - Data older than 7 days  → skip operational alarms, send "no data" alert instead
-//   - Data older than 3 days  → still run alarms but flag as stale in logs
-//   - No IO records at all    → send "no data" alert
+//   - Data older than 7 days  → skip operational alarms, raise "no data" instead
+//   - No IO records at all    → raise "no data"
 //
 // Who gets emailed (all three must be ON — see migration 004):
 //   customers.notifications_enabled       company-wide switch
@@ -2659,7 +2668,9 @@ import { sendBatchAlertEmail, DeviceAlert } from "@/lib/email";
 //   Manage them from the Notifications screen or PATCH /api/notifications.
 //
 // Params:
-//   ?test_to=you@email.com   — redirects all emails to you (test mode, skips cooldown)
+//   ?test_to=you@email.com   — send every email that is relevant now to you only,
+//                              ignoring the clock gates; writes no delivery state
+//   ?dry_run=1               — send nothing, return what would be sent and why
 //   ?customer_id=uuid        — scan only one customer's devices
 // ============================================================================
 
@@ -2671,11 +2682,9 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD || "",
 });
 
-const DEFAULT_COOLDOWN  = 60 * 24;   // 1 day (1440 minutes)
 const HOUR_MS           = 60 * 60 * 1000;
 const DAY_MS            = 24 * HOUR_MS;
-const STALE_WARN_DAYS   = 3;         // flag as stale, still run alarms
-const STALE_BLOCK_DAYS  = 7;         // suppress operational alarms, send no-data alert
+const STALE_BLOCK_DAYS  = 7;         // suppress operational alarms, raise no-data alert
 
 // ── Water-shortage accumulator tuning ────────────────────────────────────────
 // The accumulator's resolution is the scan interval, so these assume the scan
@@ -2689,29 +2698,13 @@ const WATER_MAX_TICK_CREDIT_SECONDS = 10 * 60;  // cap credited by any single sc
 const WATER_MAX_DATA_AGE_MS         = 30 * 60 * 1000; // older telemetry cannot vouch for "now"
 const WATER_EPISODE_EXPIRY_MS       = 7 * DAY_MS;     // untouched episodes stop counting
 
-// ── Dispatch: one roundup a day, plus a fast lane ────────────────────────────
-// Everything a customer needs to know arrives in a single email per company per
-// day. The one exception is collapsing supply voltage, which strands a vehicle
-// and cannot wait until tomorrow morning — that goes out on detection.
-const REPORTING_TZ      = "Asia/Kolkata";
-const DIGEST_HOUR       = 9;   // local hour the daily roundup goes out
+// Under/over current uses the same accumulator (signals "under_current" and
+// "over_current" in device_water_short_log), with a shorter hold: 15 minutes
+// of engine-on time outside the ±10% band. A reading hovering at the edge of
+// the band therefore cannot raise and clear the alarm scan after scan.
+const CURRENT_SUSTAINED_SECONDS     = 15 * 60;
+
 const IO_EXTERNAL_VOLTAGE = 66; // Teltonika AVL id — external supply, millivolts
-
-// Alert ids that bypass the daily roundup. Keep this list short: every addition
-// is another email that can arrive at 3am.
-const IMMEDIATE_ALERT_IDS = new Set(["external_power_low"]);
-
-// A digest that fails to send is retried, but only this many times in a day.
-// Without a ceiling a sustained SMTP outage retries every scan indefinitely.
-const MAX_DIGEST_ATTEMPTS_PER_DAY = 3;
-
-const istHourFmt = new Intl.DateTimeFormat("en-GB", {
-  timeZone: REPORTING_TZ, hour: "2-digit", hourCycle: "h23",
-});
-
-function istHour(d: Date): number {
-  return parseInt(istHourFmt.format(d), 10);
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2722,17 +2715,6 @@ interface Alarm {
   severity: "critical" | "warning";
   message: string;
   action: string;
-}
-
-interface CollectedAlert {
-  deviceId:        string;
-  alertId:         string;
-  customerId:      string;
-  customerName:    string;
-  contactName:     string;
-  cooldownMinutes: number;
-  isNoData:        boolean;
-  alert:           DeviceAlert;
 }
 
 // ─── IO helpers ───────────────────────────────────────────────────────────────
@@ -2815,7 +2797,8 @@ function getDeviceModel(device: any): string {
 // So 15 minutes of running, a shutdown, then another 20 minutes leaves the
 // counter at 35 minutes rather than restarting at 20.
 
-type WaterSignal = "cell" | "bubbler" | "tank";
+// The table is named for water, but the current alarms ride the same machinery.
+type WaterSignal = "cell" | "bubbler" | "tank" | "under_current" | "over_current";
 
 interface WaterTick {
   deviceId: string;
@@ -2935,34 +2918,8 @@ async function tickWaterShort(client: any, tick: WaterTick): Promise<number> {
   }
 }
 
-// ─── No-data alert backoff ───────────────────────────────────────────────────
-//
-// Operational alarms describe something happening now, so a flat daily repeat
-// suits them. "This device has been dark for 104 days" does not change between
-// one day and the next, and repeating it daily is how a customer learns to
-// filter the whole alert stream to trash.
-//
-// The repeat interval widens with the length of the outage:
-//   day 7   first notice (the device just crossed STALE_BLOCK_DAYS)
-//   day 21  +14 days
-//   day 51  +30 days, and every 30 days after that
-//
-// It never stops entirely — a unit nobody can account for should keep
-// resurfacing, just not often enough to be ignored. To silence one for good,
-// mute it in device_alert_settings or soft-delete it; that is a deliberate
-// decision someone makes, not something the alert system should infer.
-function noDataCooldownMinutes(dataAgeMs: number): number {
-  // Infinity (never reported at all) falls through to the widest interval.
-  const days = dataAgeMs / DAY_MS;
-  const repeatDays = days < 21 ? 14 : 30;
-
-  // Shave two hours so the alert re-qualifies slightly BEFORE the digest window
-  // it is aimed at. On an exact 14 days, a roundup delivered at 09:02 leaves the
-  // alert two minutes inside its cooldown at 09:00 on the target day — it slips
-  // to the next day, and to the day after that next cycle, drifting later every
-  // time. The margin only has to exceed how late a digest can run.
-  return repeatDays * 24 * 60 - 120;
-}
+// The no-data repeat schedule (14 days, then every 30) is applied when the
+// daily digest is assembled — see noDataDue in src/lib/alert-dispatch.ts.
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -3054,6 +3011,20 @@ async function computeAlarmsFMC650(
     countable, applicable: hasMainTank,
   });
 
+  // Current band. The COMPARISON is on raw Ain.1; only the MESSAGE is in amps.
+  // Identical band to HealthPanel.tsx — keep the two in step. The panel shows
+  // the instant reading; the email waits for CURRENT_SUSTAINED_SECONDS.
+  const hasSetpoint = setAin1Raw !== null;
+  const tol         = hasSetpoint ? setAin1Raw! * SETPOINT_TOLERANCE : 0;
+  const isUnder     = hasSetpoint && ain1Raw !== null && ain1Raw < setAin1Raw! - tol;
+  const isOver      = hasSetpoint && ain1Raw !== null && ain1Raw > setAin1Raw! + tol;
+  const underSeconds = await tickWaterShort(client, {
+    deviceId, signal: "under_current", active: isUnder, countable, applicable: hasSetpoint,
+  });
+  const overSeconds = await tickWaterShort(client, {
+    deviceId, signal: "over_current", active: isOver, countable, applicable: hasSetpoint,
+  });
+
   // Always
   if (din1 === 0 && ain1A !== null && ain1A > 2)
     alarms.push({ id: "abnormal_current_off", severity: "critical",
@@ -3099,19 +3070,17 @@ async function computeAlarmsFMC650(
         message: `Main water tank level is low (${formatDuration(tankSeconds)} of engine-on time)`,
         action: "Fill the main water tank" });
 
-    // Over/under current.
-    // The COMPARISON is on raw Ain.1; only the MESSAGE is converted to amps.
-    // Identical rule to HealthPanel.tsx — keep the two in step.
-    if (isRunning && setAin1Raw !== null && ain1Raw !== null) {
-      const tol     = setAin1Raw * SETPOINT_TOLERANCE;
+    // Over/under current — only once the deviation has held for
+    // CURRENT_SUSTAINED_SECONDS of engine-on time.
+    if (isRunning && hasSetpoint) {
       const setAmps = rawToAmps(setAin1Raw, FMC650_CURRENT_DIV);
-      if (ain1Raw < setAin1Raw - tol)
+      if (isUnder && underSeconds >= CURRENT_SUSTAINED_SECONDS)
         alarms.push({ id: "under_current", severity: "warning",
-          message: `Running under current — ${ain1A} A (set: ${setAmps} A)`,
+          message: `Running under current — ${ain1A} A (set: ${setAmps} A), ${formatDuration(underSeconds)} of engine-on time`,
           action: "Contact Saarthi Support (±10% tolerance)" });
-      else if (ain1Raw > setAin1Raw + tol)
+      else if (isOver && overSeconds >= CURRENT_SUSTAINED_SECONDS)
         alarms.push({ id: "over_current", severity: "warning",
-          message: `Running over current — ${ain1A} A (set: ${setAmps} A)`,
+          message: `Running over current — ${ain1A} A (set: ${setAmps} A), ${formatDuration(overSeconds)} of engine-on time`,
           action: "Contact Saarthi Support (±10% tolerance)" });
     }
   }
@@ -3124,9 +3093,11 @@ async function computeAlarmsFMC650(
 export async function POST(request: NextRequest) {
   const client = await pool.connect();
 
-  const testTo           = request.nextUrl.searchParams.get("test_to");
-  const filterCustomerId = request.nextUrl.searchParams.get("customer_id");
-  const isTestMode       = !!testTo;
+  const params           = request.nextUrl.searchParams;
+  const testTo           = params.get("test_to");
+  const dryRun           = params.get("dry_run") === "1" || params.get("dry_run") === "true";
+  const filterCustomerId = params.get("customer_id");
+  const live             = !testTo && !dryRun;
 
   try {
     // 1. Fetch devices
@@ -3143,14 +3114,10 @@ export async function POST(request: NextRequest) {
         d.customer_id, d.system_voltage,
         c.name AS customer_name,
         c.contact_person_name AS contact_name,
-        -- Setpoint now lives on devices (migration 007) as a RAW Ain.1 value.
-        -- It used to be device_alert_settings.set_current, in amps — that
-        -- column is superseded, and 007 backfills from it. Keeping the setpoint
-        -- on devices means the health panel and this scan read one field, so
-        -- the emails and the on-screen panel cannot drift apart.
-        d.set_ain1_raw,
-        das.alerts_enabled,
-        COALESCE(das.cooldown_minutes, ${DEFAULT_COOLDOWN}) AS cooldown_minutes
+        c.timezone,
+        -- Setpoint lives on devices (migration 007) as a RAW Ain.1 value, so
+        -- the health panel and this scan read one field and cannot drift apart.
+        d.set_ain1_raw
       FROM devices d
       JOIN customers c ON c.id = d.customer_id
       LEFT JOIN device_alert_settings das ON das.device_id = d.id
@@ -3166,9 +3133,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: "No GreenX devices found", checked: 0, emails_sent: 0 });
     }
 
-    // 2. Fetch user emails by customer.
+    // 2. Recipients by customer.
     //    Individually unsubscribed users are dropped here. If that empties a
-    //    company's list the alert still goes out with support on CC only —
+    //    company's list the email still goes out with support on CC only —
     //    to stop that entirely, mute the company instead of its people.
     const customerIds = [...new Set(devicesResult.rows.map((d: any) => d.customer_id))];
     const usersResult = await client.query(`
@@ -3180,18 +3147,34 @@ export async function POST(request: NextRequest) {
 
     const usersByCustomer: Record<string, { email: string; name: string }[]> = {};
     for (const row of usersResult.rows) {
-      if (!usersByCustomer[row.customer_id]) usersByCustomer[row.customer_id] = [];
-      usersByCustomer[row.customer_id].push({ email: row.email, name: row.full_name || row.email });
+      (usersByCustomer[row.customer_id] ||= []).push({ email: row.email, name: row.full_name || row.email });
     }
 
-    // 3. Scan each device
-    const collectedAlerts: CollectedAlert[] = [];
-    const devicesWithNoAlerts: string[]     = [];
+    // 3. Evaluate every device
+    const detected: DetectedAlarm[]      = [];
+    const meta = new Map<string, DeviceMeta>();
+    const devicesWithNoAlerts: string[]  = [];
+    // Engine not running right now — its engine-dependent faults are held open.
+    const stoppedDevices: string[]       = [];
+    const contexts = new Map<string, CustomerContext>();
 
     for (const device of devicesResult.rows) {
       const model = getDeviceModel(device);
+      meta.set(device.id, { name: device.device_name || device.imei, imei: device.imei, model });
 
-      // ── Determine data freshness ──────────────────────────────────────────
+      if (!contexts.has(device.customer_id)) {
+        contexts.set(device.customer_id, {
+          id:          device.customer_id,
+          name:        device.customer_name,
+          contactName: device.contact_name || device.customer_name,
+          timezone:    safeTimeZone(device.timezone),
+          recipients:  usersByCustomer[device.customer_id] || [],
+          deviceIds:   [],
+        });
+      }
+      contexts.get(device.customer_id)!.deviceIds.push(device.id);
+
+      // ── Data freshness ────────────────────────────────────────────────────
       // Newest record of any io_id. A single seek on (device_id, timestamp DESC)
       // — the LIMIT 1 is what keeps it from touching the device's history.
       const lastSeenResult = await client.query(`
@@ -3204,7 +3187,6 @@ export async function POST(request: NextRequest) {
 
       let lastSeenAt: Date | null = null;
       let dataAgeMs = Infinity;
-
       if (lastSeenResult.rows.length > 0) {
         const t = new Date(lastSeenResult.rows[0].timestamp).getTime();
         if (!isNaN(t)) {
@@ -3213,77 +3195,26 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const isDataBlocked = dataAgeMs >= STALE_BLOCK_DAYS * DAY_MS; // 7d+
-      const hasNoData     = lastSeenResult.rows.length === 0;
-
-      // ── No data at all OR data is 7d+ old → send no-data alert ───────────
-      if (hasNoData || isDataBlocked) {
+      // ── No data at all, or 7+ days old → no-data alarm only ──────────────
+      if (lastSeenResult.rows.length === 0 || dataAgeMs >= STALE_BLOCK_DAYS * DAY_MS) {
         const lastSeenStr = lastSeenAt
           ? `last data received ${Math.floor(dataAgeMs / DAY_MS)} days ago`
           : "no data ever received";
-
-        const noDataAlarm: Alarm = {
-          id:       "no_data_7d",
+        detected.push({
+          deviceId: device.id, customerId: device.customer_id,
+          alertId:  "no_data_7d",
           severity: "warning",
           message:  `No data received for 7+ days (${lastSeenStr})`,
           action:   "Check device connectivity and SIM card — device may be offline",
-        };
-
-        // Backoff, not the device's flat cooldown: the longer a unit has been
-        // dark, the less often repeating it tells anyone anything new.
-        const noDataCooldown = noDataCooldownMinutes(dataAgeMs);
-
-        // Cooldown check. Only a delivered email starts the cooldown — a failed
-        // attempt (the SMTP outage) must not silence the alert for days.
-        let shouldSkip = false;
-        if (!isTestMode) {
-          const recentCheck = await client.query(`
-            SELECT id FROM notification_log
-            WHERE device_id = $1 AND alert_id = $2 AND resolved_at IS NULL
-              AND email_status = 'sent'
-              AND sent_at > NOW() - INTERVAL '1 minute' * $3
-            LIMIT 1
-          `, [device.id, noDataAlarm.id, noDataCooldown]);
-          shouldSkip = recentCheck.rows.length > 0;
-        }
-
-        if (!shouldSkip) {
-          collectedAlerts.push({
-            deviceId: device.id, alertId: noDataAlarm.id,
-            customerId: device.customer_id, customerName: device.customer_name,
-            contactName: device.contact_name || device.customer_name,
-            cooldownMinutes: noDataCooldown,
-            isNoData: true,
-            alert: {
-              deviceName: device.device_name || device.imei,
-              deviceImei: device.imei, deviceModel: model,
-              severity: noDataAlarm.severity,
-              message: noDataAlarm.message, action: noDataAlarm.action,
-            },
-          });
-        }
-        continue; // skip operational alarms for this device
+        });
+        continue;
       }
 
-      // ── Data is fresh (within 7 days) — run operational alarms ───────────
-      // Latest value for each IO the alarm logic reads.
-      //
-      // The obvious form — DISTINCT ON (io_id) across the whole device — walks
-      // every row that device ever reported to find the newest of each group.
-      // On a 300M-row io_records that is minutes per device.
-      //
-      // The lookback bound is doing the heavy lifting until
-      // idx_io_records_device_io_ts (device_id, io_id, timestamp) exists. With
-      // only (device_id, timestamp) available the planner scans backward in time
-      // filtering on io_id, so an IO this device never reports costs a scan of
-      // its entire history — measured at 17s for one such lookup. The bound caps
-      // that at one window's worth of rows.
-      //
-      // Reusing STALE_BLOCK_DAYS keeps it consistent: a device whose newest
-      // record is older than this is already treated as no-data above, so a
-      // signal older than this cannot describe the present either. Once the
-      // composite index is built this bound can be dropped — each lookup becomes
-      // a seek and a never-reported IO returns from an empty range.
+      // ── Fresh data — operational alarms ──────────────────────────────────
+      // Latest value for each IO the alarm logic reads, one bounded seek per
+      // IO. The lookback bound keeps an IO this device never reports from
+      // scanning its entire history; it can go once
+      // idx_io_records_device_io_ts (device_id, io_id, timestamp) exists.
       const ioResult = await client.query(`
         SELECT ids.io_id, r.io_value
         FROM unnest($2::int[]) AS ids(io_id)
@@ -3302,6 +3233,12 @@ export async function POST(request: NextRequest) {
         io_id: r.io_id, io_value: parseFloat(r.io_value),
       }));
 
+      // Same "running" test computeAlarmsFMC650 applies.
+      const ain1A = calcCurrentFMC650(ioRecords);
+      if (!(getIO(ioRecords, 1) === 1 && ain1A !== null && ain1A > 2)) {
+        stoppedDevices.push(device.id);
+      }
+
       const alarms = await computeAlarmsFMC650(
         client, ioRecords, model, device.id,
         device.set_ain1_raw != null ? parseFloat(device.set_ain1_raw) : null,
@@ -3317,194 +3254,59 @@ export async function POST(request: NextRequest) {
       }
 
       for (const alarm of alarms) {
-        // Operational alarms carry no per-alert cooldown any more: the daily
-        // digest gate already limits a company to one roundup a day, and a
-        // second limiter on top of it only causes drift — an alarm sent at
-        // 09:00 yesterday would still be inside a 24h cooldown at 09:00 today
-        // and silently fall out of the roundup.
-        //
-        // Immediate alerts keep theirs, because nothing else rate-limits them
-        // and the scan runs every five minutes.
-        if (!isTestMode && IMMEDIATE_ALERT_IDS.has(alarm.id)) {
-          const recentCheck = await client.query(`
-            SELECT id FROM notification_log
-            WHERE device_id = $1 AND alert_id = $2 AND resolved_at IS NULL
-              AND email_status = 'sent'
-              AND sent_at > NOW() - INTERVAL '1 minute' * $3
-            LIMIT 1
-          `, [device.id, alarm.id, device.cooldown_minutes]);
-          if (recentCheck.rows.length > 0) continue;
-        }
-
-        collectedAlerts.push({
-          deviceId: device.id, alertId: alarm.id,
-          customerId: device.customer_id, customerName: device.customer_name,
-          contactName: device.contact_name || device.customer_name,
-          cooldownMinutes: device.cooldown_minutes,
-          isNoData: false,
-          alert: {
-            deviceName: device.device_name || device.imei,
-            deviceImei: device.imei, deviceModel: model,
-            severity: alarm.severity, message: alarm.message, action: alarm.action,
-          },
+        detected.push({
+          deviceId: device.id, customerId: device.customer_id,
+          alertId: alarm.id, severity: alarm.severity,
+          message: alarm.message, action: alarm.action,
         });
       }
     }
 
-    // Resolve no-alarm devices
-    if (!isTestMode && devicesWithNoAlerts.length > 0) {
+    // notification_log.resolved_at still backs GET ?active=true.
+    if (live && devicesWithNoAlerts.length > 0) {
       await client.query(
         `UPDATE notification_log SET resolved_at = NOW() WHERE device_id = ANY($1) AND resolved_at IS NULL`,
         [devicesWithNoAlerts]
       );
     }
 
-    // 4. Group by customer, send one email each
-    const byCustomer: Record<string, { customerName: string; contactName: string; alerts: CollectedAlert[] }> = {};
-    for (const ca of collectedAlerts) {
-      if (!byCustomer[ca.customerId]) {
-        byCustomer[ca.customerId] = { customerName: ca.customerName, contactName: ca.contactName, alerts: [] };
+    // 4. Record what was seen. This runs in every mode: it is an observation,
+    //    not a delivery, and it is what makes the digest complete.
+    let episodes;
+    try {
+      episodes = await recordEpisodes(
+        client, detected, devicesResult.rows.map((d: any) => d.id), stoppedDevices
+      );
+    } catch (err: any) {
+      if (err?.code === "42P01") {
+        return NextResponse.json({
+          success: false,
+          error: "alert_episodes table missing — run: node scripts/apply-migration.js db/migrations/019_alert_episodes.sql",
+        }, { status: 500 });
       }
-      byCustomer[ca.customerId].alerts.push(ca);
+      throw err;
     }
 
-    const emailResults: any[] = [];
-    const heldForDigest: any[] = [];
-    const timestamp = new Date().toISOString();
-    const now       = new Date();
-    const digestWindowOpen = istHour(now) >= DIGEST_HOUR;
+    // 5. Send what is due
+    const customers = [...contexts.values()];
+    const opts = { testTo, dryRun, partial: !!filterCustomerId };
+    const immediate = await dispatchImmediate(client, customers, meta, opts);
+    const digests   = await dispatchCustomerDigests(client, customers, meta, opts);
+    const support   = await dispatchSupportDigest(client, customers, meta, opts);
 
-    // Has this company had its roundup today (reporting-local)?
-    //
-    // Retrying a failed send is right — one Gmail hiccup should not cost a
-    // customer the whole day. Retrying it FOREVER is not: an SMTP outage that
-    // lasted weeks turned this gate into a 5-minute loop that logged thousands
-    // of dead attempts. So a delivered digest closes the gate, and so does
-    // running out of attempts. Both count as settled for today.
-    async function digestSettledToday(
-      customerId: string
-    ): Promise<{ held: boolean; reason: string }> {
-      const r = await client.query(`
-        SELECT
-          COUNT(*) FILTER (WHERE nl.email_status = 'sent') AS delivered,
-          COUNT(DISTINCT date_trunc('minute', nl.sent_at)) AS attempts
-        FROM notification_log nl
-        JOIN devices d ON d.id = nl.device_id
-        WHERE d.customer_id = $1
-          AND nl.dispatch_kind = 'digest'
-          AND (nl.sent_at AT TIME ZONE $2)::date = (NOW() AT TIME ZONE $2)::date
-      `, [customerId, REPORTING_TZ]);
-
-      const delivered = Number(r.rows[0]?.delivered || 0);
-      const attempts  = Number(r.rows[0]?.attempts  || 0);
-
-      if (delivered > 0) return { held: true, reason: "already delivered today" };
-      if (attempts >= MAX_DIGEST_ATTEMPTS_PER_DAY) {
-        return { held: true, reason: `${attempts} failed attempts today — retrying tomorrow` };
-      }
-      return { held: false, reason: "" };
-    }
-
-    async function dispatch(
-      customerId: string,
-      group: { customerName: string; contactName: string },
-      alerts: CollectedAlert[],
-      kind: "digest" | "immediate"
-    ) {
-      const customerUsers       = usersByCustomer[customerId] || [];
-      const realRecipientEmails = customerUsers.map((u) => u.email);
-      const primaryContactName  = customerUsers[0]?.name || group.contactName;
-      const deviceAlerts        = alerts.map((ca) => ca.alert);
-
-      const emailResult = await sendBatchAlertEmail({
-        to:           isTestMode ? [testTo!] : realRecipientEmails,
-        cc:           isTestMode ? [] : undefined,
-        contactName:  primaryContactName,
-        customerName: group.customerName,
-        alerts:       deviceAlerts,
-        timestamp,
-        dispatchKind: kind,
-      });
-
-      const emailStatus = emailResult.success ? "sent" : `error: ${emailResult.error}`;
-
-      if (!isTestMode) {
-        for (const ca of alerts) {
-          await client.query(`
-            INSERT INTO notification_log
-              (device_id, alert_id, severity, message, action,
-               customer_email, customer_name, device_name, device_imei,
-               email_status, dispatch_kind)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-          `, [
-            ca.deviceId, ca.alertId, ca.alert.severity,
-            ca.alert.message, ca.alert.action,
-            realRecipientEmails.join(", "), group.customerName,
-            ca.alert.deviceName, ca.alert.deviceImei, emailStatus, kind,
-          ]);
-        }
-      }
-
-      emailResults.push({
-        customer:         group.customerName,
-        customer_id:      customerId,
-        dispatch:         kind,
-        alerts_count:     deviceAlerts.length,
-        devices_affected: new Set(deviceAlerts.map((a) => a.deviceImei)).size,
-        actual_sent_to:   emailResult.sentTo,
-        actual_cc:        emailResult.ccTo,
-        ...(isTestMode ? {
-          production_would_send_to: realRecipientEmails,
-          production_would_cc: "support team (auto)",
-          test_mode: true,
-        } : {}),
-        status: emailStatus,
-        alerts: deviceAlerts.map((a) => ({ device: a.deviceName, severity: a.severity, message: a.message })),
-      });
-    }
-
-    for (const [customerId, group] of Object.entries(byCustomer)) {
-      const immediate = group.alerts.filter((ca) => IMMEDIATE_ALERT_IDS.has(ca.alertId));
-      const digest    = group.alerts.filter((ca) => !IMMEDIATE_ALERT_IDS.has(ca.alertId));
-
-      // Urgent first, and unconditionally — this is the whole point of the fast
-      // lane. Its own per-alert cooldown stops it repeating every five minutes.
-      if (immediate.length > 0) {
-        await dispatch(customerId, group, immediate, "immediate");
-      }
-
-      if (digest.length === 0) continue;
-
-      // Test mode shows what a roundup would contain regardless of the clock,
-      // otherwise a dry run before 09:00 would look misleadingly empty.
-      const settled = digestWindowOpen
-        ? await digestSettledToday(customerId)
-        : { held: true, reason: `before ${DIGEST_HOUR}:00 ${REPORTING_TZ}` };
-      const due = isTestMode || !settled.held;
-
-      if (due) {
-        await dispatch(customerId, group, digest, "digest");
-      } else {
-        // Not sent and not logged, so nothing is consumed — these are simply
-        // re-evaluated on the next scan and land in the next roundup.
-        heldForDigest.push({
-          customer:     group.customerName,
-          customer_id:  customerId,
-          alerts_held:  digest.length,
-          reason:       settled.reason,
-        });
-      }
-    }
-
+    const emails = [...immediate, ...digests.sent];
     return NextResponse.json({
       success: true,
-      ...(isTestMode       ? { test_mode: true, test_email: testTo } : {}),
+      ...(testTo           ? { test_mode: true, test_email: testTo } : {}),
+      ...(dryRun           ? { dry_run: true } : {}),
       ...(filterCustomerId ? { filtered_customer_id: filterCustomerId } : {}),
       checked:      devicesResult.rows.length,
-      total_alerts: collectedAlerts.length,
-      emails_sent:  emailResults.length,
-      emails:       emailResults,
-      ...(heldForDigest.length > 0 ? { held_for_digest: heldForDigest } : {}),
+      total_alerts: detected.length,
+      episodes,
+      emails_sent:  emails.filter((e) => e.status === "sent").length + (support.status === "sent" ? 1 : 0),
+      emails,
+      ...(digests.held.length > 0 ? { held_for_digest: digests.held } : {}),
+      support_digest: support,
     });
   } catch (error: any) {
     console.error("[ALERT CHECK ERROR]", error);

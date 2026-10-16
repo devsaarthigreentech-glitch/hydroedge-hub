@@ -178,6 +178,9 @@ const WATER_SQL = `
 SELECT COUNT(*)::int AS episodes, COALESCE(SUM(short_seconds), 0)::bigint AS secs
   FROM device_water_short_log
  WHERE device_id = $1
+   -- The table also carries the under/over-current accumulators; only these
+   -- three signals are water.
+   AND signal IN ('cell', 'bubbler', 'tank')
    AND first_seen_at < $3
    AND COALESCE(cleared_at, NOW()) >= $2
 `;

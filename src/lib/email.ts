@@ -654,8 +654,8 @@ async function deliver(mail: OutgoingMail): Promise<void> {
   }
 }
 
-// Support team — always CC'd
-const SUPPORT_EMAILS = (process.env.SUPPORT_EMAILS || "ajinkya@sgthydroedge.com,mangesh@sgthydroedge.com")
+// Support team — always CC'd, and the recipients of the 6-hourly support digest
+export const SUPPORT_EMAILS = (process.env.SUPPORT_EMAILS || "ajinkya@sgthydroedge.com,mangesh@sgthydroedge.com")
   .split(",")
   .map((e) => e.trim())
   .filter(Boolean);
@@ -671,6 +671,10 @@ export interface DeviceAlert {
   severity: "critical" | "warning";
   message: string;
   action: string;
+  /** e.g. "Ongoing since 16 Oct, 14:20" or "Cleared 16 Oct, 18:05". Optional. */
+  status?: string;
+  /** False once the fault has cleared — the card is drawn muted. Default true. */
+  active?: boolean;
 }
 
 export interface BatchAlertEmailData {
@@ -688,6 +692,28 @@ export interface BatchAlertEmailData {
    *               this one arriving at 3am means something different.
    */
   dispatchKind?: "digest" | "immediate";
+  /** IANA zone the times in the email are shown in. Defaults to Asia/Kolkata. */
+  timeZone?: string;
+}
+
+const ZONE_ABBR: Record<string, string> = {
+  "Asia/Kolkata":      "IST",
+  "Asia/Kuala_Lumpur": "MYT",
+  "Africa/Lusaka":     "CAT",
+};
+
+/** "16 Oct 2026, 14:20 IST" in the given zone. */
+export function formatInZone(iso: string | Date, timeZone = "Asia/Kolkata"): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone, day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
+  // Intl gives "GMT+8" for zones without an English abbreviation; name the
+  // ones the fleet actually runs in.
+  const zone = ZONE_ABBR[timeZone] || get("timeZoneName");
+  return `${get("day")} ${get("month")} ${get("year")}, ${get("hour")}:${get("minute")} ${zone}`;
 }
 
 // ============================================================================
@@ -713,8 +739,11 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
     return { success: false, sentTo: [], ccTo: [], error: "No recipients" };
   }
 
-  const critCount = data.alerts.filter((a) => a.severity === "critical").length;
-  const warnCount = data.alerts.filter((a) => a.severity === "warning").length;
+  // Counts describe what still needs attention. A fault that cleared since the
+  // last summary is listed in the body but must not make the subject shout.
+  const open      = data.alerts.filter((a) => a.active !== false);
+  const critCount = open.filter((a) => a.severity === "critical").length;
+  const warnCount = open.filter((a) => a.severity === "warning").length;
   const deviceCount = new Set(data.alerts.map((a) => a.deviceImei)).size;
 
   // Subject line summarizes the batch. An urgent send is marked so it stands
@@ -724,7 +753,9 @@ export async function sendBatchAlertEmail(data: BatchAlertEmailData): Promise<{
     ? `🚨 URGENT — ${data.alerts[0]?.message || "Critical alert"} — ${data.customerName}`
     : critCount > 0
     ? `🔴 ${critCount} Critical Alert${critCount > 1 ? "s" : ""}${warnCount > 0 ? ` + ${warnCount} Warning${warnCount > 1 ? "s" : ""}` : ""} — ${data.customerName}`
-    : `🟡 ${warnCount} Warning${warnCount > 1 ? "s" : ""} — ${data.customerName}`;
+    : warnCount > 0
+    ? `🟡 ${warnCount} Warning${warnCount > 1 ? "s" : ""} — ${data.customerName}`
+    : `✅ ${data.alerts.length} issue${data.alerts.length > 1 ? "s" : ""} resolved since your last summary — ${data.customerName}`;
 
   try {
     await deliver({
@@ -840,7 +871,7 @@ function buildBatchAlertHtml(
   const isImmediate = data.dispatchKind === "immediate";
   const hasCritical = critCount > 0;
   // An urgent send always reads red, whatever the severity mix underneath it.
-  const headerBg = isImmediate || hasCritical ? "#dc2626" : "#d97706";
+  const headerBg = isImmediate || hasCritical ? "#dc2626" : warnCount > 0 ? "#d97706" : "#16a34a";
 
   // Group alerts by device
   const byDevice: Record<string, DeviceAlert[]> = {};
@@ -859,6 +890,22 @@ function buildBatchAlertHtml(
       const alertItemsHtml = alerts
         .map((a) => {
           const isCrit = a.severity === "critical";
+          // A cleared fault is drawn grey: it is context, not a call to action.
+          if (a.active === false) {
+            return `
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; margin-bottom: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="font-size: 8px; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; background: #16a34a; color: white;">
+                  resolved
+                </span>
+              </div>
+              <div style="font-size: 14px; font-weight: 600; color: #475569; margin-bottom: 3px;">
+                ${a.message}
+              </div>
+              ${a.status ? `<div style="font-size: 11px; color: #64748b;">${a.status}</div>` : ""}
+            </div>
+          `;
+          }
           return `
             <div style="background: ${isCrit ? "#fef2f2" : "#fffbeb"}; border: 1px solid ${isCrit ? "#fecaca" : "#fde68a"}; border-radius: 8px; padding: 12px 14px; margin-bottom: 6px;">
               <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
@@ -872,6 +919,7 @@ function buildBatchAlertHtml(
               <div style="font-size: 12px; color: ${isCrit ? "#b91c1c" : "#b45309"};">
                 → ${a.action}
               </div>
+              ${a.status ? `<div style="font-size: 11px; color: #64748b; margin-top: 4px;">${a.status}</div>` : ""}
             </div>
           `;
         })
@@ -901,9 +949,12 @@ function buildBatchAlertHtml(
     .join("");
 
   // Summary line
+  const resolvedCount = data.alerts.filter((a) => a.active === false).length;
   const summaryParts: string[] = [];
   if (critCount > 0) summaryParts.push(`${critCount} critical`);
   if (warnCount > 0) summaryParts.push(`${warnCount} warning${warnCount > 1 ? "s" : ""}`);
+  if (resolvedCount > 0) summaryParts.push(`${resolvedCount} resolved`);
+  const when = formatInZone(data.timestamp, data.timeZone);
 
   return `
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 620px; margin: 0 auto; background: #ffffff;">
@@ -911,7 +962,7 @@ function buildBatchAlertHtml(
   <!-- Header -->
   <div style="background: ${headerBg}; padding: 24px 28px; border-radius: 12px 12px 0 0;">
     <h1 style="color: white; margin: 0; font-size: 20px; font-weight: 700;">
-      ${isImmediate ? "🚨 Urgent Alert" : `${hasCritical ? "🔴" : "🟡"} Daily System Health Summary`}
+      ${isImmediate ? "🚨 Urgent Alert" : `${hasCritical ? "🔴" : warnCount > 0 ? "🟡" : "✅"} Daily System Health Summary`}
     </h1>
     <p style="color: rgba(255,255,255,0.9); margin: 6px 0 0; font-size: 13px;">
       ${summaryParts.join(" + ")} across ${deviceCount} device${deviceCount > 1 ? "s" : ""} · ${data.customerName}
@@ -928,9 +979,9 @@ function buildBatchAlertHtml(
     <p style="font-size: 13px; color: #4b5563; margin: 0 0 20px; line-height: 1.5;">
       ${isImmediate
         ? `This needs attention now and has been sent ahead of your daily summary. Detected at
-           <strong>${new Date(data.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</strong>:`
-        : `Here is the current status of your devices as of
-           <strong>${new Date(data.timestamp).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</strong>:`}
+           <strong>${when}</strong>:`
+        : `Here is everything that needed attention since your last summary, as of
+           <strong>${when}</strong>. Issues that have since resolved are listed in grey:`}
     </p>
 
     <!-- Alert cards grouped by device -->
@@ -942,7 +993,7 @@ function buildBatchAlertHtml(
         This is an automated alert from the SGT Hydroedge health monitoring system.<br>
         ${isImmediate
           ? "Urgent faults are sent as soon as they are detected. Everything else arrives in one daily summary."
-          : "You receive one summary a day listing every device that currently needs attention. Urgent faults are sent separately, as soon as they are detected."}
+          : "You receive one summary a day, at 09:00 your time, covering everything since the previous one. Urgent faults are sent separately, as soon as they are detected."}
       </p>
     </div>
   </div>

@@ -188,6 +188,13 @@ export function Sidebar({
             isOpen={showLabels}
             onClick={() => handleNavClick("notifications")}
           />
+          <NavButton
+            icon={<Icons.Logs />}
+            label="Alert Activity"
+            isActive={currentView === "alert_activity"}
+            isOpen={showLabels}
+            onClick={() => handleNavClick("alert_activity")}
+          />
         </div>
 
         {/* Quick Filters — clicking opens Customer Detail */}

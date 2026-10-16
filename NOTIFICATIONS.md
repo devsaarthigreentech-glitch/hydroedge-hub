@@ -44,32 +44,51 @@ node scripts/apply-migration.js db/migrations/005_water_short_accumulator.sql
 node scripts/apply-migration.js db/migrations/006_daily_digest_and_power_alert.sql
 ```
 
+```bash
+node scripts/apply-migration.js db/migrations/019_alert_episodes.sql
+```
+
 `004` adds the subscribe/unsubscribe columns and unsubscribes Turbo Energy,
 replacing the customer-id that used to be hardcoded in the alert route. `005`
 converts the water-shortage tracker to an accumulator. `006` adds
 `devices.system_voltage` and `notification_log.dispatch_kind` for the daily
 digest. All are idempotent — re-running changes nothing.
 
-## How much mail a customer gets
+## How much mail goes out
 
-**One email per company per day**, at 09:00 IST, listing every device that
-currently needs attention. It is a status summary, not an event feed: an
-unresolved fault appears in it again tomorrow, because it still needs fixing.
+Every scan records what it detects in `alert_episodes` — one row per fault
+occurrence, with when it started (`first_seen_at`), when it was last seen and
+when it cleared. Emails are built from that record, not from the instant of the
+scan, so a fault that came and went overnight is still reported.
 
-**One exception** goes out the moment it is detected, without waiting for the
-morning: external supply voltage collapsing. A stranded vehicle cannot wait
-until 09:00. Nothing else uses the fast lane — the list is
-`IMMEDIATE_ALERT_IDS` in the alert route, and every addition to it is another
-email that can arrive at 3am.
+| Email | To | When | Contents |
+| --- | --- | --- | --- |
+| Daily summary | the company's users, support CC'd | first scan at/after **09:00 in the company's timezone** (`customers.timezone`, default IST) that has something to report | every fault still open, plus every fault that cleared since the previous delivered summary (shown as resolved) |
+| Support digest | `SUPPORT_EMAILS` only | at most once per **6-hour block** (00/06/12/18 IST) | only faults that **started** since the last digest. Ongoing faults are not repeated; a fault that recurs within 24 h of a previous occurrence is not "new". Nothing new → no email |
+| Urgent | the company's users, support CC'd | on detection, repeated at most daily while open | `IMMEDIATE_ALERT_IDS` only — today just low external power |
 
-The digest hour is `DIGEST_HOUR` in the same file. The gate asks "has this
-company had a *delivered* digest today, in `Asia/Kolkata`" — a failed send does
-not count, so an SMTP hiccup at 09:00 retries on the next scan instead of losing
-the day.
+So a customer gets at most one summary a day, and support at most four digests.
 
-Consequence worth knowing: a critical fault detected at 09:05 waits until the
-next morning. That is the trade for one predictable email a day. If something
-needs to escalate faster, add its alert id to `IMMEDIATE_ALERT_IDS`.
+Rules worth knowing:
+
+- **Failed sends never count.** Delivery marks (`customer_reported_at`,
+  `support_notified_at`, `immediate_sent_at`) are written only for a delivered
+  email. A failure is retried on the next scan, up to 3 times per day (summary)
+  or per block (support digest), then waits for the next window.
+- **Engine-off is not "resolved".** Water, current and the other running-only
+  alarms cannot be evaluated while the engine is stopped, so their episodes stay
+  open on a stopped device (up to 7 days) instead of being reported as cleared.
+  Any other fault closes after 30 minutes undetected.
+- **No-data repeats slowly.** A device dark for 7+ days is listed once, then
+  every 14 days, then every 30 — not daily.
+- **Under/over current needs 15 minutes** of engine-on time outside the ±10%
+  band before it counts, so a reading hovering at the edge does not flap.
+- Set each company's timezone under Customers → Edit. With none set, its summary
+  goes at 09:00 IST.
+
+Every email attempt is recorded in `alert_dispatches`. **Sidebar → Alert
+Activity** shows open and recently cleared faults per company, today's summary
+state, and every recent email with its result.
 
 ## Low external power
 
@@ -115,15 +134,21 @@ with the effective recipient list per company.
 
 ## Enabling the schedule
 
-Test first — this redirects every email to you, skips the cooldown, and writes
-nothing to `notification_log`:
+Two safe ways to look before anything reaches a customer. Both still record
+episodes (that is observation, not delivery) but write no delivery state:
 
 ```bash
-curl -X POST "http://localhost:3000/api/alerts/check?test_to=you@sgthydroedge.com"
+curl -s -X POST "http://localhost:3000/api/alerts/check?dry_run=1"
 ```
 
-The response lists, per company, who *would* have been mailed in production
-(`production_would_send_to`). Confirm Turbo Energy is absent before going live.
+```bash
+curl -s -X POST "http://localhost:3000/api/alerts/check?test_to=you@sgthydroedge.com"
+```
+
+`dry_run` sends nothing and returns what would go out and why the rest is held.
+`test_to` sends every email that is relevant right now — summaries, the support
+digest, urgent — to you only, ignoring the clock. The response lists who *would*
+have been mailed in production (`production_would_send_to`).
 
 Then schedule the real thing. **Every 5 minutes**, not hourly:
 
@@ -131,9 +156,9 @@ Then schedule the real thing. **Every 5 minutes**, not hourly:
 */5 * * * *  curl -s -X POST http://localhost:3000/api/alerts/check >> /var/log/alerts.log 2>&1
 ```
 
-A frequent scan does not produce more email — the per-alert cooldown is one day
-(`DEFAULT_COOLDOWN = 60 * 24`). The cadence matters because the water-shortage
-counter below advances once per scan, so the scan interval *is* its resolution.
+A frequent scan does not produce more email — the sending windows above do the
+limiting. The cadence matters because the water and current counters advance
+once per scan, so the scan interval *is* their resolution.
 
 To scan a single company, add `?customer_id=<uuid>`.
 

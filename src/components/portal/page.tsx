@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { UserList } from "@/components/users/UserList";
 import { AddUserModal } from "@/components/users/AddUserModal";
 import { NotificationSettings } from "@/components/notifications/NotificationSettings";
+import { AlertActivity } from "@/components/notifications/AlertActivity";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { THEME } from "@/lib/theme";
 
@@ -382,6 +383,9 @@ useEffect(() => {
 
           {/* Notification Subscriptions View */}
           {currentView === "notifications" && <NotificationSettings />}
+
+          {/* What the alert system saw and sent */}
+          {currentView === "alert_activity" && <AlertActivity />}
         </div>
       </div>
 
