@@ -96,6 +96,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { archiveQuery, planLogSources } from '@/lib/archive-db';
+import { parseLogQuery, buildLogSql } from '@/lib/io-logs-query';
 
 // Kept as a constant because the merge below re-applies it: two sources each
 // capped at N, concatenated, re-sorted, then trimmed back to N.
@@ -107,97 +108,16 @@ export async function GET(
 ) {
   try {
     const { deviceId } = await context.params;
-    const searchParams = request.nextUrl.searchParams;
-
-    const ioIdsParam = searchParams.get('io_ids');   // comma-separated: "1,216,24"
-    const startTime = searchParams.get('start');      // ISO string (UTC)
-    const endTime = searchParams.get('end');          // ISO string (UTC)
-
-    if (!ioIdsParam) {
-      return NextResponse.json(
-        { success: false, error: 'io_ids parameter is required' },
-        { status: 400 }
-      );
+    // Validation and filters are shared with /export so the CSV matches this.
+    const q = parseLogQuery(request.nextUrl.searchParams);
+    if ('error' in q) {
+      return NextResponse.json({ success: false, error: q.error }, { status: 400 });
     }
+    const { start, end } = q;
 
-    if (!startTime || !endTime) {
-      return NextResponse.json(
-        { success: false, error: 'start and end parameters are required' },
-        { status: 400 }
-      );
-    }
-
-    const ioIds = ioIdsParam.split(',').map(Number).filter(n => !isNaN(n));
-
-    if (ioIds.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'No valid io_ids provided' },
-        { status: 400 }
-      );
-    }
-
-    if (ioIds.length > 10) {
-      return NextResponse.json(
-        { success: false, error: 'Maximum 10 IO parameters at once' },
-        { status: 400 }
-      );
-    }
-
-    // Validate time range isn't too wide (max 7 days)
-    const start = new Date(startTime);
-    const end = new Date(endTime);
-    const diffDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-
-    if (diffDays > 7) {
-      return NextResponse.json(
-        { success: false, error: 'Time range cannot exceed 7 days' },
-        { status: 400 }
-      );
-    }
-
-    // const sql = `
-    //   SELECT io_id, io_value, timestamp
-    //   FROM io_records
-    //   WHERE device_id = $1
-    //     AND io_id = ANY($2::int[])
-    //     AND timestamp >= $3
-    //     AND timestamp <= $4
-    //     AND timestamp > '2025-01-01'
-    //   ORDER BY timestamp DESC
-    //   LIMIT 1000
-    // `;
-
-    // const result = await query(sql, [deviceId, ioIds, startTime, endTime]);
-
-    const minVal = searchParams.get('min');
-    const maxVal = searchParams.get('max');
-
-    let sql = `
-      SELECT io_id, io_value, timestamp
-      FROM io_records
-      WHERE device_id = $1
-        AND io_id = ANY($2::int[])
-        AND timestamp >= $3
-        AND timestamp <= $4
-        AND timestamp > '2025-01-01'
-    `;
-
-    const sqlParams: any[] = [deviceId, ioIds, startTime, endTime];
-    let paramIdx = 5;
-
-    if (minVal !== null && minVal !== '') {
-      sql += ` AND io_value::numeric >= $${paramIdx}`;
-      sqlParams.push(parseFloat(minVal));
-      paramIdx++;
-    }
-
-    if (maxVal !== null && maxVal !== '') {
-      sql += ` AND io_value::numeric <= $${paramIdx}`;
-      sqlParams.push(parseFloat(maxVal));
-      paramIdx++;
-    }
-
-    sql += ` ORDER BY timestamp DESC LIMIT ${ROW_LIMIT}`;
+    const built = buildLogSql(deviceId, q, start, end);
+    const sql = built.sql + ` ORDER BY timestamp DESC LIMIT ${ROW_LIMIT}`;
+    const sqlParams = built.params;
 
     // ── Which database holds this window? ─────────────────────────────────
     // Early raw history for a few devices lives on the archive box and was never

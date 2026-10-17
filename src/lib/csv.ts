@@ -1,5 +1,6 @@
 // ============================================================================
-// CSV export helpers (browser-side)
+// CSV helpers — csvRow/formatISTForCSV are used server-side by the export
+// route; downloadBlob is browser-only.
 // ============================================================================
 
 type Cell = string | number | null | undefined;
@@ -11,13 +12,21 @@ function escapeCell(value: Cell): string {
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function toCSV(headers: string[], rows: Cell[][]): string {
-  return [headers, ...rows].map((r) => r.map(escapeCell).join(",")).join("\r\n");
+/** One CSV line, including its trailing CRLF. */
+export function csvRow(cells: Cell[]): string {
+  return cells.map(escapeCell).join(",") + "\r\n";
 }
 
-// The BOM makes Excel read the file as UTF-8, so units like °C survive.
-export function downloadCSV(filename: string, csv: string): void {
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+// Prepended to the file so Excel reads it as UTF-8 and units like °C survive.
+export const CSV_BOM = "﻿";
+
+// "2026-10-17 14:32:05" in IST — sortable, and Excel parses it as a date.
+export function formatISTForCSV(ts: string | Date): string {
+  const ist = new Date(new Date(ts).getTime() + 5.5 * 60 * 60 * 1000);
+  return ist.toISOString().slice(0, 19).replace("T", " ");
+}
+
+export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -26,10 +35,4 @@ export function downloadCSV(filename: string, csv: string): void {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-// "2026-10-17 14:32:05" in IST — sortable, and Excel parses it as a date.
-export function formatISTForCSV(ts: string): string {
-  const ist = new Date(new Date(ts).getTime() + 5.5 * 60 * 60 * 1000);
-  return ist.toISOString().slice(0, 19).replace("T", " ");
 }

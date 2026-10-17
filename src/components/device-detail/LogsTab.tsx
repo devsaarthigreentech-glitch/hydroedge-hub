@@ -830,38 +830,8 @@
 import React, { useState, useCallback } from "react";
 import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
-import { toCSV, downloadCSV, formatISTForCSV } from "@/lib/csv";
-
-// ── Hardcoded common IO parameters ──────────────────────────────────────────
-
-const COMMON_PARAMS: { io_id: number; name: string; unit: string; multiplier?: number }[] = [
-  { io_id: 216, name: "vehicle.mileage", unit: "m" },
-  { io_id: 16, name: "total.odometer", unit: "m" },
-  { io_id: 18, name: "can.fuel.rate", unit: "l/hr", multiplier: 0.1 },
-  { io_id: 9, name: "ain.1", unit: "V", multiplier: 0.001 },
-  { io_id: 10, name: "ain.2", unit: "V", multiplier: 0.001 },
-  { io_id: 11, name: "ain.3", unit: "V", multiplier: 0.001 },
-  { io_id: 245, name: "ain.4", unit: "V", multiplier: 0.001 },
-  { io_id: 179, name: "dout.1", unit: "" },
-  { io_id: 180, name: "dout.2", unit: "" },
-  { io_id: 1, name: "din.1", unit: "" },
-  { io_id: 2, name: "din.2", unit: "" },
-  { io_id: 3, name: "din.3", unit: "" },
-  { io_id: 4, name: "din.4", unit: "" },
-  { io_id: 67, name: "battery.voltage", unit: "V", multiplier: 0.001 },
-  { io_id: 66, name: "external.voltage", unit: "V", multiplier: 0.001 },
-  { io_id: 68, name: "battery.current", unit: "mA" },
-  { io_id: 12, name: "fuel.used.gps", unit: "l", multiplier: 0.001 },
-  { io_id: 13, name: "fuel.rate.gps", unit: "l/100km", multiplier: 0.01 },
-  { io_id: 34, name: "can.fuel.level.liters", unit: "l", multiplier: 0.1 },
-  { io_id: 35, name: "can.engine.rpm", unit: "rpm" },
-  { io_id: 36, name: "can.tracker.counted.mileage", unit: "m" },
-  { io_id: 24, name: "vehicle.speed", unit: "km/h" },
-  { io_id: 239, name: "ignition.status", unit: "" },
-  { io_id: 240, name: "movement.status", unit: "" },
-  { io_id: 199, name: "trip.odometer", unit: "m" },
-  { io_id: 21, name: "gsm.signal.level", unit: "%" },
-];
+import { downloadBlob } from "@/lib/csv";
+import { COMMON_PARAMS, MAX_RANGE_DAYS, getParam, formatIOValue } from "@/lib/io-params";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -922,9 +892,10 @@ interface LogRecord {
 }
 
 export function LogsTab({ device }: LogsTabProps) {
-  const [selectedDate, setSelectedDate] = useState(todayDate());
-  const [startTime, setStartTime] = useState("00:00");
-  const [endTime, setEndTime] = useState("23:59");
+  const [fromDate, setFromDate] = useState(todayDate());
+  const [fromTime, setFromTime] = useState("00:00");
+  const [toDate, setToDate] = useState(todayDate());
+  const [toTime, setToTime] = useState("23:59");
   const [selectedIOIds, setSelectedIOIds] = useState<number[]>([]);
   const [showParamDropdown, setShowParamDropdown] = useState(false);
   const [paramSearch, setParamSearch] = useState("");
@@ -934,21 +905,12 @@ export function LogsTab({ device }: LogsTabProps) {
 
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [queryInfo, setQueryInfo] = useState<{ count: number; time: number } | null>(null);
-  // Snapshot of the filters behind the current results, so Export matches what
+  // Snapshot of the query behind the current results, so Export matches what
   // is on screen even if the user edits the filters afterwards.
-  const [fetched, setFetched] = useState<{ ioIds: number[]; date: string; start: string; end: string } | null>(null);
-
-  const getParam = (ioId: number) => COMMON_PARAMS.find((p) => p.io_id === ioId);
-
-  const formatValue = (ioId: number, raw: string): string => {
-    const p = getParam(ioId);
-    if (!p?.multiplier) return raw;
-    const num = parseFloat(raw);
-    if (isNaN(num)) return raw;
-    return parseFloat((num * p.multiplier).toFixed(3)).toString();
-  };
+  const [fetched, setFetched] = useState<{ query: string; filename: string } | null>(null);
 
   const toggleIOId = (ioId: number) => {
     setSelectedIOIds((prev) => {
@@ -968,29 +930,34 @@ export function LogsTab({ device }: LogsTabProps) {
       return;
     }
 
+    const startMs = new Date(`${fromDate}T${fromTime}:00+05:30`).getTime();
+    const endMs = new Date(`${toDate}T${toTime}:59+05:30`).getTime();
+    if (isNaN(startMs) || isNaN(endMs)) {
+      setError("Pick a valid From and To date");
+      return;
+    }
+    if (endMs <= startMs) {
+      setError("\"To\" must be after \"From\"");
+      return;
+    }
+    if (endMs - startMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      setError(`Range can be at most ${MAX_RANGE_DAYS} days`);
+      return;
+    }
+
     setError("");
     setLoading(true);
     setRecords([]);
     setQueryInfo(null);
-
-    const startIST = `${selectedDate}T${startTime}:00+05:30`;
-    const endIST = `${selectedDate}T${endTime}:59+05:30`;
-    const startUTC = new Date(startIST).toISOString();
-    const endUTC = new Date(endIST).toISOString();
+    setFetched(null);
 
     const t0 = performance.now();
 
     try {
-      // const params = new URLSearchParams({
-      //   io_ids: selectedIOIds.join(","),
-      //   start: startUTC,
-      //   end: endUTC,
-      // });
-
       const params = new URLSearchParams({
         io_ids: selectedIOIds.join(","),
-        start: startUTC,
-        end: endUTC,
+        start: new Date(startMs).toISOString(),
+        end: new Date(endMs).toISOString(),
       });
       if (minFilter.trim() || maxFilter.trim()) {
         // If only one IO param selected and it has a multiplier, convert back to raw
@@ -1015,7 +982,12 @@ export function LogsTab({ device }: LogsTabProps) {
       if (data.success) {
         setRecords(data.data);
         setQueryInfo({ count: data.count, time: elapsed });
-        setFetched({ ioIds: [...selectedIOIds], date: selectedDate, start: startTime, end: endTime });
+        const who = (device.device_name || device.imei).replace(/[^\w.-]+/g, "_");
+        const stamp = (d: string, t: string) => `${d}_${t.replace(":", "")}`;
+        setFetched({
+          query: params.toString(),
+          filename: `${who}_logs_${stamp(fromDate, fromTime)}_to_${stamp(toDate, toTime)}.csv`,
+        });
       } else {
         setError(data.error || "Failed to fetch logs");
       }
@@ -1024,36 +996,27 @@ export function LogsTab({ device }: LogsTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [device.id, selectedDate, startTime, endTime, selectedIOIds, minFilter, maxFilter]);
+  }, [device.id, device.device_name, device.imei, fromDate, fromTime, toDate, toTime, selectedIOIds, minFilter, maxFilter]);
 
-  // One row per timestamp, one column per parameter (unit in the header), oldest
-  // first. Values are scaled the same way as the table.
-  const handleExport = () => {
-    if (!fetched || records.length === 0) return;
-
-    const byTs = new Map<string, Map<number, string>>();
-    for (const rec of records) {
-      let row = byTs.get(rec.timestamp);
-      if (!row) byTs.set(rec.timestamp, (row = new Map()));
-      row.set(rec.io_id, formatValue(rec.io_id, rec.io_value));
+  // The table is capped at 1,000 rows; the export endpoint streams every row in
+  // the window. A failed or cut-off stream rejects res.blob(), so a partial file
+  // is never saved.
+  const handleExport = async () => {
+    if (!fetched || exporting) return;
+    setExporting(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/io-logs/${device.id}/export?${fetched.query}`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `Export failed (${res.status})`);
+      }
+      downloadBlob(fetched.filename, await res.blob());
+    } catch (err: any) {
+      setError(err?.message ? `Export failed: ${err.message}` : "Export failed. Please try again.");
+    } finally {
+      setExporting(false);
     }
-
-    const headers = [
-      "Timestamp (IST)",
-      ...fetched.ioIds.map((id) => {
-        const p = getParam(id);
-        const name = p?.name || `io.${id}`;
-        return p?.unit ? `${name} (${p.unit})` : name;
-      }),
-    ];
-
-    const rows = [...byTs.entries()]
-      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
-      .map(([ts, vals]) => [formatISTForCSV(ts), ...fetched.ioIds.map((id) => vals.get(id) ?? "")]);
-
-    const who = (device.device_name || device.imei).replace(/[^\w.-]+/g, "_");
-    const span = `${fetched.start}-${fetched.end}`.replace(/:/g, "");
-    downloadCSV(`${who}_logs_${fetched.date}_${span}.csv`, toCSV(headers, rows));
   };
 
   const filteredParams = COMMON_PARAMS.filter((p) => {
@@ -1190,25 +1153,40 @@ export function LogsTab({ device }: LogsTabProps) {
           boxShadow: THEME.shadow.sm,
         }}
       >
-        {/* Row 1: Date + Time */}
+        {/* Row 1: From / To (date + time) */}
         <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 180px", minWidth: 160 }}>
-            <label style={labelStyle}>Date</label>
+          <div style={{ flex: "1 1 160px", minWidth: 150 }}>
+            <label style={labelStyle}>From Date</label>
             <input
               type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              value={fromDate}
+              onChange={(e) => {
+                setFromDate(e.target.value);
+                // Keep the range valid when From moves past To.
+                if (e.target.value > toDate) setToDate(e.target.value);
+              }}
               max={todayDate()}
               style={inputStyle}
             />
           </div>
-          <div style={{ flex: "1 1 140px", minWidth: 120 }}>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
             <label style={labelStyle}>From Time (IST)</label>
-            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
+            <input type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} style={inputStyle} />
           </div>
-          <div style={{ flex: "1 1 140px", minWidth: 120 }}>
+          <div style={{ flex: "1 1 160px", minWidth: 150 }}>
+            <label style={labelStyle}>To Date</label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              min={fromDate}
+              max={todayDate()}
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ flex: "1 1 120px", minWidth: 110 }}>
             <label style={labelStyle}>To Time (IST)</label>
-            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
+            <input type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} style={inputStyle} />
           </div>
         </div>
 
@@ -1494,20 +1472,20 @@ export function LogsTab({ device }: LogsTabProps) {
               </div>
               <button
                 onClick={handleExport}
-                disabled={records.length === 0}
-                title={records.length === 0 ? "Nothing to export" : "Download these results as CSV"}
+                disabled={records.length === 0 || exporting}
+                title={records.length === 0 ? "Nothing to export" : "Download every record in this range as CSV"}
                 style={{
                   background: "white",
                   color: records.length > 0 ? THEME.primary[600] : THEME.text.tertiary,
                   border: `2px solid ${records.length > 0 ? THEME.primary[200] : THEME.border.light}`,
                   borderRadius: 8, padding: "6px 14px", fontWeight: 700, fontSize: 12,
-                  cursor: records.length > 0 ? "pointer" : "not-allowed",
+                  cursor: records.length > 0 && !exporting ? "pointer" : "not-allowed",
                   fontFamily: "inherit", transition: "all 0.2s",
                 }}
                 onMouseEnter={(e) => { if (records.length > 0) e.currentTarget.style.background = THEME.primary[50]; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "white"; }}
               >
-                ⬇ EXPORT CSV
+                {exporting ? "⏳ EXPORTING..." : "⬇ EXPORT CSV"}
               </button>
             </div>
           </div>
@@ -1578,7 +1556,7 @@ export function LogsTab({ device }: LogsTabProps) {
                           fontFamily: "JetBrains Mono, monospace",
                           fontSize: 13, fontWeight: 700, color: THEME.text.primary,
                         }}>
-                          {formatValue(rec.io_id, rec.io_value)}
+                          {formatIOValue(rec.io_id, rec.io_value)}
                           {p?.unit && (
                             <span style={{ marginLeft: 4, fontSize: 11, fontWeight: 400, color: THEME.text.tertiary }}>
                               {p.unit}
@@ -1598,7 +1576,7 @@ export function LogsTab({ device }: LogsTabProps) {
               padding: "10px 20px", borderTop: `1px solid ${THEME.border.light}`,
               background: "#fffbeb", fontSize: 12, color: "#92400e", fontWeight: 500,
             }}>
-              ⚠️ Results capped at 1,000 records. Narrow your time range for complete data.
+              ⚠️ Table shows the latest 1,000 records only. Export CSV includes every record in the range.
             </div>
           )}
         </div>
@@ -1615,7 +1593,7 @@ export function LogsTab({ device }: LogsTabProps) {
             Select parameters and time range
           </div>
           <div style={{ fontSize: 13, color: THEME.text.tertiary, maxWidth: 400, margin: "0 auto" }}>
-            Choose a date, time window, and one or more IO parameters above, then click Fetch Logs to query the database.
+            Choose a From and To date/time (up to {MAX_RANGE_DAYS} days) and one or more IO parameters above, then click Fetch Logs. Export CSV downloads every record in that range.
           </div>
         </div>
       )}
