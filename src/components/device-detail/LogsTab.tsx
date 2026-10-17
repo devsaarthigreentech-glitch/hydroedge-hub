@@ -830,6 +830,7 @@
 import React, { useState, useCallback } from "react";
 import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
+import { toCSV, downloadCSV, formatISTForCSV } from "@/lib/csv";
 
 // ── Hardcoded common IO parameters ──────────────────────────────────────────
 
@@ -935,6 +936,9 @@ export function LogsTab({ device }: LogsTabProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [queryInfo, setQueryInfo] = useState<{ count: number; time: number } | null>(null);
+  // Snapshot of the filters behind the current results, so Export matches what
+  // is on screen even if the user edits the filters afterwards.
+  const [fetched, setFetched] = useState<{ ioIds: number[]; date: string; start: string; end: string } | null>(null);
 
   const getParam = (ioId: number) => COMMON_PARAMS.find((p) => p.io_id === ioId);
 
@@ -1011,6 +1015,7 @@ export function LogsTab({ device }: LogsTabProps) {
       if (data.success) {
         setRecords(data.data);
         setQueryInfo({ count: data.count, time: elapsed });
+        setFetched({ ioIds: [...selectedIOIds], date: selectedDate, start: startTime, end: endTime });
       } else {
         setError(data.error || "Failed to fetch logs");
       }
@@ -1020,6 +1025,36 @@ export function LogsTab({ device }: LogsTabProps) {
       setLoading(false);
     }
   }, [device.id, selectedDate, startTime, endTime, selectedIOIds, minFilter, maxFilter]);
+
+  // One row per timestamp, one column per parameter (unit in the header), oldest
+  // first. Values are scaled the same way as the table.
+  const handleExport = () => {
+    if (!fetched || records.length === 0) return;
+
+    const byTs = new Map<string, Map<number, string>>();
+    for (const rec of records) {
+      let row = byTs.get(rec.timestamp);
+      if (!row) byTs.set(rec.timestamp, (row = new Map()));
+      row.set(rec.io_id, formatValue(rec.io_id, rec.io_value));
+    }
+
+    const headers = [
+      "Timestamp (IST)",
+      ...fetched.ioIds.map((id) => {
+        const p = getParam(id);
+        const name = p?.name || `io.${id}`;
+        return p?.unit ? `${name} (${p.unit})` : name;
+      }),
+    ];
+
+    const rows = [...byTs.entries()]
+      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
+      .map(([ts, vals]) => [formatISTForCSV(ts), ...fetched.ioIds.map((id) => vals.get(id) ?? "")]);
+
+    const who = (device.device_name || device.imei).replace(/[^\w.-]+/g, "_");
+    const span = `${fetched.start}-${fetched.end}`.replace(/:/g, "");
+    downloadCSV(`${who}_logs_${fetched.date}_${span}.csv`, toCSV(headers, rows));
+  };
 
   const filteredParams = COMMON_PARAMS.filter((p) => {
     if (!paramSearch) return true;
@@ -1453,8 +1488,27 @@ export function LogsTab({ device }: LogsTabProps) {
                 {queryInfo.count} records
               </span>
             </div>
-            <div style={{ fontSize: 11, color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace" }}>
-              {queryInfo.time}ms
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ fontSize: 11, color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace" }}>
+                {queryInfo.time}ms
+              </div>
+              <button
+                onClick={handleExport}
+                disabled={records.length === 0}
+                title={records.length === 0 ? "Nothing to export" : "Download these results as CSV"}
+                style={{
+                  background: "white",
+                  color: records.length > 0 ? THEME.primary[600] : THEME.text.tertiary,
+                  border: `2px solid ${records.length > 0 ? THEME.primary[200] : THEME.border.light}`,
+                  borderRadius: 8, padding: "6px 14px", fontWeight: 700, fontSize: 12,
+                  cursor: records.length > 0 ? "pointer" : "not-allowed",
+                  fontFamily: "inherit", transition: "all 0.2s",
+                }}
+                onMouseEnter={(e) => { if (records.length > 0) e.currentTarget.style.background = THEME.primary[50]; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "white"; }}
+              >
+                ⬇ EXPORT CSV
+              </button>
             </div>
           </div>
 
