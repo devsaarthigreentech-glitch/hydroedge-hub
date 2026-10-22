@@ -127,6 +127,17 @@ V3_CONDITIONAL = {
     "P-5506": "rs485_ok_count",        # RS485 bus active (migration 018)
     "P-5507": "rs485_err_count",
     "P-5508": "rs485_last_result",
+    "P-4127": "fuel_sender_pct",       # fuel sense on + reading trusted (migration 022)
+    "P-4128": "fuel_sender_v",         # fuel sense on
+    "P-4129": "fuel_sender_l",         # needs tank capacity P-5604
+    "P-4130": "fuel_sender_fault",     # sent only when true
+    "P-4131": "power_source",          # backup battery on
+    "P-4132": "backup_batt_v",         # a backup cell answers
+    "P-4133": "backup_batt_pct",
+    "P-4134": "backup_charge_state",
+    "P-4135": "power_loss_events",     # after the first power loss
+    "P-4136": "last_power_loss",
+    "P-4137": "backup_selftest",
 }
 PID_COL = {**ALWAYS, **CONDITIONAL, **V3_ALWAYS, **V3_CONDITIONAL}
 
@@ -147,6 +158,10 @@ STATE_COLS = [
     "ota_state", "ota_progress_pct", "ota_last_result",
     "plant_producing",
     "rs485_ok_count", "rs485_err_count", "rs485_last_result",
+    # NanoV3 fuel sender + backup battery (migration 022)
+    "fuel_sender_pct", "fuel_sender_v", "fuel_sender_l", "fuel_sender_fault",
+    "power_source", "backup_batt_v", "backup_batt_pct", "backup_charge_state",
+    "power_loss_events", "last_power_loss", "backup_selftest",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
     "active_faults", "d",
 ]

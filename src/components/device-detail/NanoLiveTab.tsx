@@ -61,6 +61,10 @@ const GROUPS: Group[] = [
     pids: ["P-4123", "P-4124", "P-4125"] },
   { title: "RS485 / Modbus", icon: "🔌", color: "#0d9488", bg: "#f0fdfa",
     pids: ["P-5506", "P-5507", "P-5508"] },
+  { title: "Fuel Sender", icon: "⛽", color: "#b45309", bg: "#fffbeb",
+    pids: ["P-4127", "P-4129", "P-4128", "P-4130"] },
+  { title: "Power & Backup Battery", icon: "🔋", color: "#16a34a", bg: "#f0fdf4",
+    pids: ["P-4131", "P-4132", "P-4133", "P-4134", "P-4135", "P-4136", "P-4137"] },
   { title: "Engine (CAN / Modbus)", icon: "🚛", color: "#7c3aed", bg: "#f5f3ff",
     pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117"] },
 ];

@@ -33,7 +33,7 @@ const SECTIONS: Array<{ name: string; icon: string; cats: string[] }> = [
   { name: "Network & Cloud", icon: "🌐", cats: ["Cellular / Network", "MQTT / Cloud", "Config File & Management Meta"] },
   { name: "Telemetry & Logging", icon: "📡", cats: ["Telemetry / Reporting", "Live Telemetry / Measured Status", "Message Buffer / Store-and-Forward", "Logging / SD Card"] },
   { name: "HHO Control", icon: "⚡", cats: ["Current Control", "Cell Current & HHO Measurement", "Safety Limits"] },
-  { name: "Engine & Power", icon: "🚛", cats: ["Engine / Application Profile", "Engine Detection & Start Interlock", "Battery Management", "CAN / J1939 Engine Data", "Energy Meter / RS485 Modbus", "Stop/Start & DOUT"] },
+  { name: "Engine & Power", icon: "🚛", cats: ["Engine / Application Profile", "Engine Detection & Start Interlock", "Battery Management", "CAN / J1939 Engine Data", "Energy Meter / RS485 Modbus", "Stop/Start & DOUT", "Fuel Sender", "Backup Battery"] },
   { name: "Fluids & Environment", icon: "💧", cats: ["Fill-System Health", "Water Management", "Pressure / Water Quality / Cold-Climate"] },
   { name: "Alerts & SMS", icon: "🔔", cats: ["Alerts / Notifications", "SMS Command Authorization"] },
   { name: "Service & Time", icon: "🛠️", cats: ["Service / Runtime Counters", "Time / RTC", "OTA / Firmware Update", "Recovery / Retry Policy"] },
