@@ -2,6 +2,15 @@
 // API ROUTE: /api/nano/command   (POST)
 // ----------------------------------------------------------------------------
 // Body: { device_id, verb: 'set'|'stop'|'start'|'get'|'getall'|'reboot', pid?, value?, confirm? }
+//   or  { device_id, text: 'set P-5021 24V', confirm? }   — typed in the Config
+//       tab's command box; parsed by lib/nano-console into the same verbs.
+//
+// Typed commands may name a P-ID the registry does not know yet, so a
+// parameter added in new firmware can be tried before its migration lands:
+// an unknown set is sent as text and the firmware is the judge (it rejects
+// unknown ids, RO rows, bad ranges and enums, and the nack shows in the log).
+// Known P-IDs get exactly the same checks as the buttons, P-802 and reboot
+// still need confirm, and WO values are still logged as '***'.
 //
 // get / getall READ from the device (firmware 40a3f6b). The device answers on
 // the same t:cfg frame a change produces -- one parameter per frame, a few per
@@ -27,6 +36,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { publishNanoCommand } from '@/lib/nano-mqtt';
+import { parseConsoleCommand } from '@/lib/nano-console';
 
 const DANGEROUS = new Set(['P-802']); // moves real current at the cell
 
@@ -58,7 +68,20 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { device_id, verb, pid, value, confirm } = body || {};
+    const { device_id, confirm } = body || {};
+    let { verb, pid, value } = body || {};
+
+    // Typed command: parse it into the same verb / pid / value the buttons send.
+    const typed = typeof body?.text === 'string';
+    if (typed) {
+      const parsed = parseConsoleCommand(body.text);
+      if ('error' in parsed) {
+        return NextResponse.json({ success: false, error: parsed.error }, { status: 400 });
+      }
+      verb = parsed.verb;
+      pid = 'pid' in parsed ? parsed.pid : undefined;
+      value = 'value' in parsed ? parsed.value : undefined;
+    }
 
     if (!device_id || !['set', 'stop', 'start', 'get', 'getall', 'reboot'].includes(verb)) {
       return NextResponse.json({ success: false, error: 'device_id and a valid verb are required' }, { status: 400 });
@@ -94,7 +117,7 @@ export async function POST(request: NextRequest) {
       // Reads are not limited to cloud-settable parameters: RO measured values
       // and write-only ones (returned as ***) are just as readable.
       const known = await query(`SELECT 1 FROM nano_registry WHERE pid = $1`, [pid]);
-      if (known.rowCount === 0) {
+      if (known.rowCount === 0 && !typed) {
         return NextResponse.json({ success: false, error: `Unknown P-ID ${pid}` }, { status: 400 });
       }
       payload = { cmd: 'get', id: pid }; rpid = pid;
@@ -107,10 +130,13 @@ export async function POST(request: NextRequest) {
         `SELECT access, settable_via, data_type, enum_values, valid_range FROM nano_registry WHERE pid = $1`,
         [pid]
       );
-      if (reg.rowCount === 0) {
+      if (reg.rowCount === 0 && !typed) {
         return NextResponse.json({ success: false, error: `Unknown P-ID ${pid}` }, { status: 400 });
       }
-      const m = reg.rows[0];
+      // Not in the registry yet: send it as typed and let the firmware decide.
+      const m = reg.rowCount === 0
+        ? { access: 'RW', settable_via: ['Cloud'], data_type: 'string', enum_values: null }
+        : reg.rows[0];
       const settable: string[] = m.settable_via || [];
       if (!['RW', 'WO'].includes(m.access) || !settable.includes('Cloud')) {
         return NextResponse.json(
@@ -140,7 +166,7 @@ export async function POST(request: NextRequest) {
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,'pending') RETURNING id`,
       [device_id, verb, rpid,
        secret ? '***' : (rval === null ? null : String(rval)),
-       JSON.stringify(secret ? { ...payload, val: '***' } : payload), 'web']
+       JSON.stringify(secret ? { ...payload, val: '***' } : payload), typed ? 'web:typed' : 'web']
     );
     const cmdId = ins.rows[0].id;
 

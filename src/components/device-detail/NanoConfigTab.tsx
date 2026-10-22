@@ -65,6 +65,9 @@ export function NanoConfigTab({ device }: { device: Device }) {
   const [log, setLog] = useState<CmdLog[]>([]);
   const [showLog, setShowLog] = useState(!isMobile);
   const [showFlags, setShowFlags] = useState(false);
+  const [cmdText, setCmdText] = useState("");
+  const [cmdErr, setCmdErr] = useState<string | null>(null);
+  const [cmdBusy, setCmdBusy] = useState(false);
 
   const catMap = useMemo(() => {
     const m: Record<string, Category> = {};
@@ -131,6 +134,34 @@ export function NanoConfigTab({ device }: { device: Device }) {
       alert("Network error");
     }
   }, [device.id, loadConfig, loadLog]);
+
+  // Typed command ("set P-5021 24V", "get P-5021", "reboot"): parsed and checked
+  // server-side, sent like the buttons. Works for P-IDs the registry does not
+  // know yet, so new firmware parameters can be tried straight away.
+  const sendTyped = useCallback(async (text: string, confirm = false) => {
+    if (!text.trim()) return;
+    setCmdBusy(true);
+    setCmdErr(null);
+    try {
+      const res = await fetch("/api/nano/command", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: device.id, text, confirm }),
+      });
+      const data = await res.json();
+      if (!data.success && data.needsConfirm) {
+        if (window.confirm(`${data.error}\n\nSend anyway?`)) return sendTyped(text, true);
+        return;
+      }
+      if (!data.success) { setCmdErr(data.error || "Command failed"); return; }
+      setCmdText("");
+      await loadLog();
+      setTimeout(loadConfig, 1500);   // pick up the device's reply
+    } catch {
+      setCmdErr("Network error");
+    } finally {
+      setCmdBusy(false);
+    }
+  }, [device.id, loadLog, loadConfig]);
 
   // Ask the device for every parameter. It answers a few per publish cycle,
   // so values land over several seconds; refresh while they arrive. The device
@@ -290,7 +321,34 @@ export function NanoConfigTab({ device }: { device: Device }) {
       {/* ══ COMMAND LOG ══ */}
       {(showLog || !isMobile) && (
         <div style={{ width: isMobile ? "100%" : 270, minWidth: isMobile ? undefined : 270, maxHeight: isMobile ? 280 : undefined, background: C.railBg, borderLeft: isMobile ? "none" : `1px solid ${C.border}`, borderTop: isMobile ? `1px solid ${C.border}` : "none", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, fontWeight: 700, fontSize: 12, color: C.text }}>Command Log</div>
+          <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ fontWeight: 700, fontSize: 12, color: C.text, marginBottom: 6 }}>Type a command</div>
+            <form onSubmit={(e) => { e.preventDefault(); sendTyped(cmdText); }} style={{ display: "flex", gap: 6 }}>
+              <input
+                value={cmdText} onChange={(e) => { setCmdText(e.target.value); setCmdErr(null); }}
+                placeholder="set P-5021 24V" spellCheck={false} autoComplete="off" disabled={cmdBusy}
+                style={{ flex: 1, minWidth: 0, background: C.field, border: `1px solid ${cmdErr ? C.red : C.border}`, borderRadius: 6, padding: "6px 8px", color: C.text, fontSize: 12, fontFamily: "monospace", outline: "none" }}
+              />
+              <button type="submit" disabled={cmdBusy || !cmdText.trim()}
+                style={{ background: C.accentBg, border: `1px solid ${C.accentBd}`, borderRadius: 6, padding: "5px 10px", color: "#c4b5fd", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", opacity: cmdBusy || !cmdText.trim() ? 0.5 : 1 }}>
+                {cmdBusy ? "…" : "Send"}
+              </button>
+            </form>
+            {cmdErr && <div style={{ marginTop: 5, fontSize: 10, color: C.red }}>{cmdErr}</div>}
+            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {["set P-5021 24V", "get P-5021", "getall", "reboot"].map((ex) => (
+                <button key={ex} type="button" onClick={() => { setCmdText(ex); setCmdErr(null); }}
+                  title="Fill the box with this example"
+                  style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 6px", color: C.dim, fontSize: 9, fontFamily: "monospace", cursor: "pointer" }}>
+                  {ex}
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: 5, fontSize: 9, color: C.faint, lineHeight: 1.4 }}>
+              Same as the device console. Any P-ID works, even one GreenVision does not list yet; the device rejects anything it cannot apply.
+            </div>
+          </div>
+          <div style={{ padding: "8px 12px 4px", fontWeight: 700, fontSize: 12, color: C.text }}>Command Log</div>
           <div style={{ flex: 1, overflow: "auto", padding: 6 }}>
             {log.length === 0 && <div style={{ textAlign: "center", padding: 24, color: C.faint, fontSize: 10 }}>No commands yet.</div>}
             {log.map((e) => (
