@@ -377,7 +377,9 @@ export function DeviceDetail({
           />
         )}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
-        {selectedTab === "analytics" && <AnalyticsTab device={device} />}
+        {selectedTab === "analytics" && (
+          <AnalyticsTab device={device} onSaved={(updatedDevice) => onDeviceUpdated?.(updatedDevice)} />
+        )}
         {selectedTab === "commands" && <CommandsTab device={device} />}
         {selectedTab === "config" && <TeltonikaConfigurator device={device} />}
         {selectedTab === "map" && <MapTab device={device} />}

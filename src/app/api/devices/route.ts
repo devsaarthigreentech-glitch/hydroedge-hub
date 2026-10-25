@@ -104,7 +104,9 @@ export async function GET(request: NextRequest) {
         -- Weekly report override (migration 008). Read through to_jsonb so a
         -- database that has not run 008 yet returns 'auto' instead of failing
         -- the whole device list with a missing-column error.
-        COALESCE(to_jsonb(d) ->> 'weekly_report', 'auto') AS weekly_report
+        COALESCE(to_jsonb(d) ->> 'weekly_report', 'auto') AS weekly_report,
+        -- Analytics fuel baseline (migration 023), same guard; NULL = default.
+        (to_jsonb(d) ->> 'fuel_baseline_kmpl')::numeric AS fuel_baseline_kmpl
       FROM devices d
       WHERE d.deleted_at IS NULL
     `;

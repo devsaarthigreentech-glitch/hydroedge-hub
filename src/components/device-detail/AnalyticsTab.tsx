@@ -857,7 +857,11 @@ import { THEME } from "@/lib/theme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { DgAnalyticsTab } from "./DgAnalyticsTab";
 
-interface AnalyticsTabProps { device: Device; }
+interface AnalyticsTabProps {
+  device: Device;
+  /** Called with the updated row after the fuel baseline is saved. */
+  onSaved?: (device: Device) => void;
+}
 
 interface DailyData {
   day: string;
@@ -1208,7 +1212,7 @@ function formatDay(dayStr: string) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export function AnalyticsTab({ device }: AnalyticsTabProps) {
+export function AnalyticsTab({ device, onSaved }: AnalyticsTabProps) {
   const isMobile = useIsMobile();
 
   // A stationary generator gets a different set of sections entirely — see
@@ -1242,6 +1246,7 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   const [baselineKmpl, setBaselineKmpl] = useState(10);
   const [editingBaseline, setEditingBaseline] = useState(false);
   const [baselineInput, setBaselineInput] = useState("10");
+  const [baselineError, setBaselineError] = useState<string|null>(null);
   const baselineRef = useRef<HTMLInputElement>(null);
 
   const windowSub = customMode && startDate && endDate
@@ -1251,10 +1256,14 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
   // Grid columns helper
   const statGrid = isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)";
 
+  // Baseline is stored per device on the server (migration 023). A value this
+  // browser saved before that is still shown until someone sets it again.
   useEffect(() => {
-    const saved = localStorage.getItem(`baseline_kmpl_${device.id}`);
-    if (saved) { const v=parseFloat(saved); if(!isNaN(v)&&v>0){setBaselineKmpl(v);setBaselineInput(v.toString());} }
-  }, [device.id]);
+    const server = device.fuel_baseline_kmpl == null ? NaN : Number(device.fuel_baseline_kmpl);
+    const legacy = parseFloat(localStorage.getItem(`baseline_kmpl_${device.id}`) ?? "");
+    const v = server > 0 ? server : legacy > 0 ? legacy : 10;
+    setBaselineKmpl(v); setBaselineInput(v.toString());
+  }, [device.id, device.fuel_baseline_kmpl]);
 
   useEffect(() => { if(editingBaseline) baselineRef.current?.focus(); }, [editingBaseline]);
 
@@ -1344,10 +1353,27 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
     setStartDate(sd); setStartTime(st); setEndDate(ed); setEndTime(et); setCustomMode(true);
   };
 
-  const handleBaselineSave = () => {
+  const handleBaselineSave = async () => {
     const v = parseFloat(baselineInput);
-    if(!isNaN(v)&&v>0){ setBaselineKmpl(v); localStorage.setItem(`baseline_kmpl_${device.id}`,v.toString()); }
     setEditingBaseline(false);
+    if(isNaN(v)||v<=0) return;
+    // Show it straight away; put the old value back if the server refuses it.
+    const previous = baselineKmpl;
+    setBaselineKmpl(v); setBaselineError(null);
+    try {
+      const res = await fetch(`/api/devices/${device.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fuel_baseline_kmpl: v }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Could not save baseline");
+      localStorage.removeItem(`baseline_kmpl_${device.id}`); // the server copy wins from now on
+      onSaved?.(data.data);
+    } catch (e) {
+      setBaselineKmpl(previous); setBaselineInput(previous.toString());
+      setBaselineError(e instanceof Error ? e.message : "Could not save baseline");
+    }
   };
 
   const validDays = dailyData.filter(d=>d.fuel_average_kmpl!==null&&d.fuel_litres>0);
@@ -1570,9 +1596,12 @@ export function AnalyticsTab({ device }: AnalyticsTabProps) {
                 color:THEME.text.secondary,border:"none",borderRadius:8,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
             </div>
           ):(
-            <button onClick={()=>setEditingBaseline(true)} style={{padding:"6px 14px",background:"#fffbeb",
-              border:"2px solid #f59e0b",borderRadius:8,fontSize: isMobile ? 12 : 13,fontWeight:700,color:"#92400e",
-              cursor:"pointer",fontFamily:"inherit"}}>✏️ {baselineKmpl} km/L</button>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+              <button onClick={()=>setEditingBaseline(true)} style={{padding:"6px 14px",background:"#fffbeb",
+                border:"2px solid #f59e0b",borderRadius:8,fontSize: isMobile ? 12 : 13,fontWeight:700,color:"#92400e",
+                cursor:"pointer",fontFamily:"inherit"}}>✏️ {baselineKmpl} km/L</button>
+              {baselineError&&<span style={{fontSize:11,color:"#dc2626"}}>{baselineError}</span>}
+            </div>
           )}
         </div>
         {fuelLoading?<Spinner/>:renderComparisonChart()}

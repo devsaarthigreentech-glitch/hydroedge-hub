@@ -59,6 +59,11 @@ export interface Device {
   /** Vehicle electrical system, 12 or 24 V. Drives the external-power alarm. */
   system_voltage?: number | null;
   /**
+   * Analytics "Actual vs Baseline" target in km/L (migration 023). NULL/absent =
+   * the tab's 10 km/L default. pg returns NUMERIC as a string, hence the union.
+   */
+  fuel_baseline_kmpl?: number | string | null;
+  /**
    * Commissioned setpoint as the RAW Ain.1 value (millivolts), matching
    * io_records.io_value for io_id 9. Deviation alarms compare raw against raw
    * so they stay correct regardless of the amps divisor (47 on FMC650, 83 on

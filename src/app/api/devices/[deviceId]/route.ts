@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw, weekly_report } = body;
+        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw, weekly_report, fuel_baseline_kmpl } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -126,6 +126,21 @@ export async function PATCH(
             }
             updates.push(`weekly_report = $${paramCount}`);
             values.push(weekly_report);
+            paramCount++;
+        }
+
+        // Fuel efficiency baseline for the Analytics tab — see db/migrations/023.
+        // Empty string / null clears it back to the tab's 10 km/L default.
+        if (fuel_baseline_kmpl !== undefined) {
+            const kmpl = fuel_baseline_kmpl === null || fuel_baseline_kmpl === "" ? null : Number(fuel_baseline_kmpl);
+            if (kmpl !== null && (!Number.isFinite(kmpl) || kmpl <= 0 || kmpl > 100)) {
+                return NextResponse.json(
+                    { success: false, error: 'Fuel baseline must be a km/L value above 0 and up to 100, or empty' },
+                    { status: 400 }
+                );
+            }
+            updates.push(`fuel_baseline_kmpl = $${paramCount}`);
+            values.push(kmpl);
             paramCount++;
         }
 
