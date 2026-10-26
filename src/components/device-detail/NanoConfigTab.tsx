@@ -43,6 +43,15 @@ const SECTIONS: Array<{ name: string; icon: string; cats: string[] }> = [
 // the feature-flag truth table; a PID not yet in nano_registry is skipped.
 const FLAG_PIDS = ["P-515", "P-609", "P-1303", "P-1306", "P-1501", "P-4200", "P-4300", "P-5040", "P-5101", "P-5110", "P-5400", "P-5500"];
 
+// Free-text parameters with a fixed format: shown as the input's placeholder.
+// Custom CAN maps (P-4204 = Custom), max 95 chars; empty = off.
+const CAN_MAP_FORMAT = "ID, BYTE, NBYTES, BE|LE, SCALE, OFFSET[, MASK[, SHIFT]]  e.g. 0x316, 2, 2, BE, 0.25, 0";
+const PLACEHOLDERS: Record<string, string> = {
+  "P-4210": CAN_MAP_FORMAT, "P-4211": CAN_MAP_FORMAT, "P-4212": CAN_MAP_FORMAT,
+  "P-4213": CAN_MAP_FORMAT, "P-4214": CAN_MAP_FORMAT,
+};
+const MAX_LEN: Record<string, number> = { "P-4210": 95, "P-4211": 95, "P-4212": 95, "P-4213": 95, "P-4214": 95 };
+
 const C = {
   railBg: "#151515", rowBg: "#1a1a1a", border: "#2a2a2a", field: "#111",
   text: "#e2e8f0", dim: "#6b7280", faint: "#525252",
@@ -463,7 +472,8 @@ function ParamRow({ p, value, changed, onChange, onSet, onGet }: { p: Param; val
               </select>
             ) : (
               <input type={p.access === "WO" ? "password" : ["float", "int16", "uint16", "uint32", "uint8"].includes(p.data_type || "") ? "number" : "text"}
-                placeholder={p.access === "WO" ? "enter new value" : undefined} autoComplete={p.access === "WO" ? "new-password" : undefined}
+                placeholder={p.access === "WO" ? "enter new value" : PLACEHOLDERS[p.pid]} autoComplete={p.access === "WO" ? "new-password" : undefined}
+                maxLength={MAX_LEN[p.pid]} title={PLACEHOLDERS[p.pid]}
                 value={value} onChange={(e) => onChange(e.target.value)} style={field} />
             )}
           </div>
