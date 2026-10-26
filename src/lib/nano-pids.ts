@@ -87,6 +87,8 @@ export const PID_META: Record<string, PidMeta> = {
   'P-4120': { name: 'Thermal Lockout', bool: 'alarm' },
   'P-4121': { name: 'Heating Jacket On', bool: 'active' },
   'P-4122': { name: 'Heating Jacket Fault', bool: 'alarm', conditional: true },
+  'P-4139': { name: 'Low Water Stop Active', bool: 'alarm', conditional: true },
+  'P-4138': { name: 'Battery System Mismatch', bool: 'alarm', conditional: true },
   'P-5250': { name: 'Auto-RCS Zone', conditional: true },
   'P-5251': { name: 'Auto-RCS Reason', conditional: true },
   'P-4123': { name: 'OTA State' },

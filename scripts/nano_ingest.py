@@ -138,6 +138,8 @@ V3_CONDITIONAL = {
     "P-4135": "power_loss_events",     # after the first power loss
     "P-4136": "last_power_loss",
     "P-4137": "backup_selftest",
+    "P-4138": "battery_system_mismatch",  # every frame from ee911e6 (migration 024)
+    "P-4139": "low_water_stop",        # every frame from 577bcbc
 }
 PID_COL = {**ALWAYS, **CONDITIONAL, **V3_ALWAYS, **V3_CONDITIONAL}
 
@@ -162,6 +164,8 @@ STATE_COLS = [
     "fuel_sender_pct", "fuel_sender_v", "fuel_sender_l", "fuel_sender_fault",
     "power_source", "backup_batt_v", "backup_batt_pct", "backup_charge_state",
     "power_loss_events", "last_power_loss", "backup_selftest",
+    # NanoV3 remote-stop holds (migration 024)
+    "low_water_stop", "battery_system_mismatch",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
     "active_faults", "d",
 ]
@@ -409,6 +413,16 @@ class DB:
                          "db/migrations/009, 012 and 014 (nanov3 state columns) first."
                          % ", ".join(missing))
 
+            # _close_command stores the reply value on the command it closes
+            cur.execute("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='nano_commands'
+                  AND column_name='reply_text';
+            """)
+            if not cur.fetchone():
+                sys.exit("nano_commands has no 'reply_text' column — apply "
+                         "db/migrations/024 first.")
+
             # columns that would block a safe auto-create (NOT NULL, no default,
             # and not one we supply ourselves)
             cur.execute("""
@@ -548,6 +562,9 @@ class DB:
         (res != ok) is only ever a reply, so it closes the newest open command.
         An open getall is answered by the first value that arrives.
 
+        The reported value is kept on the closed command (reply_text), so the
+        command log can show what a get returned.
+
         The Commands tab marks a row "sent" once published, so open means
         "pending" or "sent".
         """
@@ -559,10 +576,11 @@ class DB:
         closed = 0
         for cmd_id, verb, wanted in cur.fetchall():
             if res != "ok" or verb == "get" or _same_value(wanted, val):
+                ok = res == "ok"
                 cur.execute("""
-                    UPDATE nano_commands SET status=%s, result_reason=%s, resolved_at=now()
+                    UPDATE nano_commands SET status=%s, result_reason=%s, reply_text=%s, resolved_at=now()
                      WHERE id=%s;
-                """, ("ok" if res == "ok" else "nack", None if res == "ok" else res, cmd_id))
+                """, ("ok" if ok else "nack", None if ok else res, _text(val) if ok else None, cmd_id))
                 closed = 1
                 break
         cur.execute("""

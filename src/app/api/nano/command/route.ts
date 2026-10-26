@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
   if (!deviceId) return NextResponse.json({ success: false, error: 'device_id required' }, { status: 400 });
   try {
     const res = await query(
-      `SELECT id, verb, pid, value_text, status, result_reason, sent_at, resolved_at
+      `SELECT id, verb, pid, value_text, status, result_reason, reply_text, sent_at, resolved_at
          FROM nano_commands WHERE device_id = $1 ORDER BY sent_at DESC LIMIT $2`,
       [deviceId, limit]
     );

@@ -5,7 +5,7 @@ import { Device } from "@/types";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useConfirm } from "@/components/ui/ConfirmModal";
 
-interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; sent_at: string; }
+interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; reply_text: string | null; sent_at: string; }
 
 const C = {
   bg: "#181818", card: "#1e1e1e", border: "#2a2a2a", field: "#111",
@@ -215,6 +215,8 @@ export function NanoCommandsTab({ device }: { device: Device }) {
                 <code style={{ fontSize: 11, color: "#c4b5fd", fontWeight: 600 }}>{e.verb} {e.pid || ""} {e.value_text || ""}</code>
                 <span style={{ fontSize: 8, color: C.faint, marginLeft: "auto" }}>{e.sent_at ? new Date(e.sent_at).toLocaleTimeString() : ""}</span>
               </div>
+              {/* What a get returned (val of the device's t:cfg reply; up to 95 chars, e.g. a SHA-256) */}
+              {e.verb === "get" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 10, color: C.green, fontFamily: "monospace", wordBreak: "break-all" }}>= {e.reply_text}</div>}
               {e.result_reason && <div style={{ marginTop: 3, fontSize: 9, color: C.red, fontFamily: "monospace" }}>{e.result_reason}</div>}
             </div>
           ))}

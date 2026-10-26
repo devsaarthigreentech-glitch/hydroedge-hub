@@ -25,7 +25,7 @@ interface Param {
   current_ts: string | null;
 }
 interface Category { name: string; params: Param[]; editable: number; }
-interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; sent_at: string; }
+interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; reply_text: string | null; sent_at: string; }
 
 // ── 28 registry categories → 8 navigable meta-sections ──────────────────────
 const SECTIONS: Array<{ name: string; icon: string; cats: string[] }> = [
@@ -41,7 +41,7 @@ const SECTIONS: Array<{ name: string; icon: string; cats: string[] }> = [
 
 // NanoV3 on/off switches (writable, persisted bools in config_table.c). Shown in
 // the feature-flag truth table; a PID not yet in nano_registry is skipped.
-const FLAG_PIDS = ["P-515", "P-609", "P-1303", "P-1306", "P-1501", "P-4200", "P-4300", "P-5101", "P-5110", "P-5400", "P-5500"];
+const FLAG_PIDS = ["P-515", "P-609", "P-1303", "P-1306", "P-1501", "P-4200", "P-4300", "P-5040", "P-5101", "P-5110", "P-5400", "P-5500"];
 
 const C = {
   railBg: "#151515", rowBg: "#1a1a1a", border: "#2a2a2a", field: "#111",
@@ -358,6 +358,8 @@ export function NanoConfigTab({ device }: { device: Device }) {
                   <code style={{ fontSize: 10, color: "#c4b5fd", fontWeight: 600 }}>{e.verb} {e.pid || ""} {e.value_text || ""}</code>
                   <span style={{ fontSize: 8, color: C.faint, marginLeft: "auto" }}>{e.sent_at ? new Date(e.sent_at).toLocaleTimeString() : ""}</span>
                 </div>
+                {/* What a get returned (val of the device's t:cfg reply; up to 95 chars, e.g. a SHA-256) */}
+                {e.verb === "get" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 9, color: C.green, fontFamily: "monospace", wordBreak: "break-all" }}>= {e.reply_text}</div>}
                 {e.result_reason && <div style={{ marginTop: 3, fontSize: 9, color: C.red, fontFamily: "monospace" }}>{e.result_reason}</div>}
               </div>
             ))}
