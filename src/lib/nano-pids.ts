@@ -54,7 +54,7 @@ export const PID_META: Record<string, PidMeta> = {
   'P-4104': { name: 'Engine RPM', unit: 'rpm', conditional: true },
   'P-4105': { name: 'Engine Load', unit: '%', conditional: true },
   'P-4106': { name: 'Fuel Rate', unit: 'L/h', conditional: true },
-  'P-4107': { name: 'Total Fuel', unit: 'L', conditional: true },
+  'P-4107': { name: 'Total Fuel Used', unit: 'L', conditional: true },
   'P-4108': { name: 'Engine Hours', unit: 'h', conditional: true },
 
   // ---- gen2 only ---------------------------------------------------------

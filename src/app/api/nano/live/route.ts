@@ -29,6 +29,7 @@ import { detectVariant, pidMeta, NanoVariant } from '@/lib/nano-pids';
 // Modbus/optional-sensor values that are absent (NULL) when the source isn't
 // reporting — never 0. `gen` = which firmware publishes it ('both' | 'gen2' | 'v3').
 type Gen = 'both' | 'gen2' | 'v3';
+const NUMERIC_TYPES = new Set(['float', 'int', 'uint', 'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32']);
 const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen }> = [
   { col: 'cell_current', pid: 'P-4075', conditional: false, gen: 'both' },
   { col: 'supply_voltage', pid: 'P-4093', conditional: false, gen: 'both' },
@@ -199,7 +200,12 @@ export async function GET(request: NextRequest) {
     const measured = MEASURED.filter((m) => showsGen(firmware, m.gen)).map((m) => {
       const r = reg[m.pid] || {};
       const local = pidMeta(m.pid, firmware);
-      const value = row[m.col];
+      // pg hands NUMERIC columns over as strings ("38.3"); send numbers, or the
+      // card shows them without a unit.
+      const raw = row[m.col];
+      const numeric = NUMERIC_TYPES.has(r.data_type) || !!local?.unit;
+      const value = numeric && typeof raw === 'string' && raw.trim() !== '' && Number.isFinite(Number(raw))
+        ? Number(raw) : raw;
       // NanoV3 level PIDs carry the opposite polarity to the Gen 2 registry
       // name ("... Level Low"), so the local name wins for those; otherwise the
       // registry is authoritative and lib/nano-pids only fills gaps.
@@ -208,7 +214,7 @@ export async function GET(request: NextRequest) {
         pid: m.pid,
         name: (levelV3 ? local?.name : r.name) || local?.name || m.col,
         value,
-        unit: r.units ?? local?.unit ?? null,
+        unit: r.units || local?.unit || null,   // an empty registry unit falls back too
         category: r.category ?? 'Other',
         data_type: r.data_type ?? null,
         conditional: m.conditional,

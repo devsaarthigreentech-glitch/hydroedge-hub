@@ -349,6 +349,13 @@ function renderValue(m: Measured): { text: string; muted?: boolean; color?: stri
     // neutral, water present is good, remote stop asserted is an alarm.
     return boolLabel(v, m.bool_kind ?? undefined);
   }
-  if (typeof v === "number") return { text: m.unit ? `${v} ${m.unit}` : String(v) };
+  if (typeof v === "number") {
+    const d = m.unit != null ? DECIMALS[m.unit] : undefined;
+    const n = d === undefined || Number.isInteger(v) ? String(v) : v.toFixed(d);
+    return { text: m.unit ? `${n} ${m.unit}` : n };
+  }
   return { text: String(v) };
 }
+
+// Display precision by unit, so CAN floats don't show raw digits ("24.6176 %").
+const DECIMALS: Record<string, number> = { rpm: 0, "%": 1, "L/h": 2, "km/h": 1, "°C": 1, L: 2, h: 1 };
