@@ -49,8 +49,9 @@ const CAN_MAP_FORMAT = "ID, BYTE, NBYTES, BE|LE, SCALE, OFFSET[, MASK[, SHIFT]] 
 const PLACEHOLDERS: Record<string, string> = {
   "P-4210": CAN_MAP_FORMAT, "P-4211": CAN_MAP_FORMAT, "P-4212": CAN_MAP_FORMAT,
   "P-4213": CAN_MAP_FORMAT, "P-4214": CAN_MAP_FORMAT, "P-4215": CAN_MAP_FORMAT,
+  "P-4222": "hex ids, e.g. 124, 1B8, 3B9 (up to 16; empty = every id)",
 };
-const MAX_LEN: Record<string, number> = { "P-4210": 95, "P-4211": 95, "P-4212": 95, "P-4213": 95, "P-4214": 95, "P-4215": 95 };
+const MAX_LEN: Record<string, number> = { "P-4210": 95, "P-4211": 95, "P-4212": 95, "P-4213": 95, "P-4214": 95, "P-4215": 95, "P-4222": 95 };
 
 const C = {
   railBg: "#151515", rowBg: "#1a1a1a", border: "#2a2a2a", field: "#111",

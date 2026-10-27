@@ -7,6 +7,7 @@ the four JSON frame shapes, and writes into the Step 1/2 schema.
 
     topic sgt/nano/{imei}/tel     telemetry   -> nano_frames + nano_device_state
     topic sgt/nano/{imei}/tel     t:cfg        -> nano_param_values (+ close nano_commands)
+    topic sgt/nano/{imei}/tel     t:canlog     -> nano_can_captures + nano_can_capture_chunks
     topic sgt/nano/{imei}/status  t:status     -> nano_device_state   (online/LWT)
     topic sgt/nano/{imei}/alert   id:A-xx      -> nano_alerts
 
@@ -48,6 +49,8 @@ Use `python3 -u` when piping to tee/journald so lines aren't batched.
 """
 
 import argparse
+import base64
+import binascii
 import json
 import logging
 import os
@@ -143,6 +146,7 @@ V3_CONDITIONAL = {
     "P-4140": "can_fuel_l",            # fresh CAN level + P-5604 set (migration 026)
     "P-4141": "fuel_spent_l",          # P-5604 set
     "P-4142": "fuel_burned_l",         # a fuel rate seen
+    "P-4225": "can_capture_state",     # firmware 28bc6a1 on (migration 027)
 }
 PID_COL = {**ALWAYS, **CONDITIONAL, **V3_ALWAYS, **V3_CONDITIONAL}
 
@@ -171,6 +175,8 @@ STATE_COLS = [
     "low_water_stop", "battery_system_mismatch",
     # NanoV3 CAN fuel accounting (migration 026)
     "can_fuel_l", "fuel_spent_l", "fuel_burned_l",
+    # NanoV3 remote CAN capture (migration 027)
+    "can_capture_state",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
     "active_faults", "d",
 ]
@@ -215,6 +221,19 @@ PARAM_UPSERT = (
     "  ts_utc=EXCLUDED.ts_utc, updated_at=now();"
 )
 
+# Remote CAN capture (migration 027). The capture row is created by its first
+# chunk; xmax = 0 tells a fresh insert from an update.
+CANCAP_UPSERT = (
+    "INSERT INTO nano_can_captures (device_id, cap, n, kbps, t0, frames, dropped)\n"
+    "VALUES (%s,%s,%s,%s,%s,%s,%s)\n"
+    "ON CONFLICT (device_id, cap) DO UPDATE SET\n"
+    "  n=EXCLUDED.n, kbps=EXCLUDED.kbps, t0=EXCLUDED.t0,\n"
+    "  frames=EXCLUDED.frames, dropped=EXCLUDED.dropped, last_at=now()\n"
+    "RETURNING (xmax = 0);"
+)
+CANCAP_KEEP = 20          # newest captures kept per device
+CANCAP_MAX_AGE = "30 days"
+
 ALERT_INSERT = (
     "INSERT INTO nano_alerts\n"
     "  (device_id, alert_id, src, sev, cat, message_key, ev, ts, ts_utc, stops, raw)\n"
@@ -250,6 +269,8 @@ def classify(leaf, payload):
         t = payload.get("t")
         if t == "cfg":
             return "writeback"
+        if t == "canlog":                 # has d + seq too: must not reach telemetry
+            return "canlog"
         if t == "status" or leaf == "status":
             return "status"
         if isinstance(payload.get("id"), str) and payload["id"].startswith("A-"):
@@ -415,7 +436,7 @@ class DB:
             missing = [c for c in STATE_COLS if c not in have]
             if missing:
                 sys.exit("nano_device_state is missing column(s) %s — apply "
-                         "the nanov3 state-column migrations in db/migrations (009, 012, 014, 022, 024, 026) first."
+                         "the nanov3 state-column migrations in db/migrations (009, 012, 014, 022, 024, 026, 027) first."
                          % ", ".join(missing))
 
             # _close_command stores the reply value on the command it closes
@@ -427,6 +448,15 @@ class DB:
             if not cur.fetchone():
                 sys.exit("nano_commands has no 'reply_text' column — apply "
                          "db/migrations/024 first.")
+
+            # remote CAN capture chunks land here
+            cur.execute("""
+                SELECT to_regclass('public.nano_can_captures'),
+                       to_regclass('public.nano_can_capture_chunks');
+            """)
+            if None in cur.fetchone():
+                sys.exit("nano_can_captures / nano_can_capture_chunks missing — apply "
+                         "db/migrations/027 first.")
 
             # columns that would block a safe auto-create (NOT NULL, no default,
             # and not one we supply ourselves)
@@ -604,6 +634,57 @@ class DB:
         self.conn.commit()
         return online
 
+    def ingest_canlog(self, device_id, payload):
+        """One chunk of a remote CAN capture (firmware 28bc6a1).
+
+        The chunks slice one byte stream, so they are stored decoded and in
+        seq order; the download joins seq 0..n-1 and parses the records. A
+        chunk the device sends twice (publish retry) is stored once. The
+        first chunk of a new capture also prunes the device's old ones.
+        Returns (received, n, complete, duplicate), or None for a bad chunk.
+        """
+        cap, seq, n = payload.get("cap"), payload.get("seq"), payload.get("n")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (cap, seq, n)):
+            return None
+        if n <= 0 or not 0 <= seq < n:
+            return None
+        try:
+            data = base64.b64decode(payload.get("d") or "", validate=True)
+        except (binascii.Error, ValueError):
+            return None
+        with self._cur() as cur:
+            cur.execute(CANCAP_UPSERT, (
+                device_id, cap, n, payload.get("kbps"), payload.get("t0"),
+                payload.get("frames"), payload.get("drop")))
+            new_capture = cur.fetchone()[0]
+            cur.execute("""
+                INSERT INTO nano_can_capture_chunks (device_id, cap, seq, data)
+                VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING;
+            """, (device_id, cap, seq, self.psycopg2.Binary(data)))
+            duplicate = cur.rowcount == 0
+            if not duplicate:
+                cur.execute("""
+                    UPDATE nano_can_captures
+                       SET received = received + 1, bytes = bytes + %s,
+                           complete = (received + 1 >= n), last_at = now()
+                     WHERE device_id=%s AND cap=%s;
+                """, (len(data), device_id, cap))
+            cur.execute("""
+                SELECT received, n, complete FROM nano_can_captures
+                 WHERE device_id=%s AND cap=%s;
+            """, (device_id, cap))
+            received, n, complete = cur.fetchone()
+            if new_capture:
+                cur.execute("""
+                    DELETE FROM nano_can_captures
+                     WHERE (device_id=%s AND cap NOT IN (
+                              SELECT cap FROM nano_can_captures WHERE device_id=%s
+                               ORDER BY first_at DESC LIMIT %s))
+                        OR first_at < now() - %s::interval;
+                """, (device_id, device_id, CANCAP_KEEP, CANCAP_MAX_AGE))
+        self.conn.commit()
+        return received, n, complete, duplicate
+
     def ingest_alert(self, device_id, payload):
         ts = payload.get("ts")
         with self._cur() as cur:
@@ -660,6 +741,18 @@ def make_client(db, args):
                 pid, res, corr = db.ingest_writeback(device_id, payload)
                 log.info("cfg imei=%s id=%s res=%s%s", imei, pid, res,
                          " (closed pending cmd)" if corr else "")
+            elif kind == "canlog":
+                r = db.ingest_canlog(device_id, payload)
+                if r is None:
+                    log.warning("canlog imei=%s: bad chunk cap=%s seq=%s n=%s", imei,
+                                payload.get("cap"), payload.get("seq"), payload.get("n"))
+                else:
+                    got, n, done, dup = r
+                    # one line per chunk would flood the log; first, last, dupes
+                    if payload.get("seq") == 0 or done or dup:
+                        log.info("canlog imei=%s cap=%s seq=%s %d/%d%s%s", imei,
+                                 payload.get("cap"), payload.get("seq"), got, n,
+                                 " complete" if done else "", " (duplicate)" if dup else "")
             elif kind == "status":
                 online = db.ingest_status(device_id, payload)
                 log.info("status imei=%s -> online=%s", imei, online)
@@ -727,6 +820,12 @@ def selftest(path):
                 print("   conditional (NULL when absent): %s" % cond)
                 print("   gps: fix=%s sat=%s lat=%s lon=%s"
                       % (sv["gps_fix"], sv["gps_sat"], sv["last_lat"], sv["last_lon"]))
+            elif kind == "canlog":
+                raw = base64.b64decode(payload.get("d") or "")
+                print("   cap=%s seq=%s/%s frames=%s drop=%s kbps=%s t0=%s bytes=%d"
+                      % (payload.get("cap"), payload.get("seq"), payload.get("n"),
+                         payload.get("frames"), payload.get("drop"), payload.get("kbps"),
+                         payload.get("t0"), len(raw)))
             elif kind == "status":
                 print("   online=%s net=%s" % (status_online(payload), payload.get("net")))
             print()
