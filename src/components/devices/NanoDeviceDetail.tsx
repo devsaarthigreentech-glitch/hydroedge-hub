@@ -12,9 +12,10 @@ import { NanoCommandsTab } from "../device-detail/NanoCommandsTab";
 import { NanoAlertsTab } from "../device-detail/NanoAlertsTab";
 import { NanoEditTab } from "../device-detail/NanoEditTab";
 import { NanoCanCaptureTab } from "../device-detail/NanoCanCaptureTab";
+import { NanoHealthTab } from "../device-detail/NanoHealthTab";
 
 // Local tab set — independent of the shared Teltonika DeviceTab union.
-type NanoTab = "live" | "edit" | "config" | "commands" | "can" | "alerts" | "history";
+type NanoTab = "live" | "health" | "edit" | "config" | "commands" | "can" | "alerts" | "history";
 
 interface NanoDeviceDetailProps {
   device: Device;
@@ -71,6 +72,7 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
   const tabs: Array<{ key: NanoTab; label: string; icon: React.ReactNode }> = [
     { key: "edit", label: "EDIT", icon: <Icons.Edit /> },
     { key: "live", label: "LIVE", icon: <Icons.Telemetry /> },
+    { key: "health", label: "HEALTH", icon: <Icons.Chart /> },
     { key: "config", label: "CONFIG", icon: <Icons.Commands /> },
     { key: "commands", label: "COMMANDS", icon: <Icons.Commands /> },
     { key: "can", label: "CAN CAPTURE", icon: <Icons.Logs /> },
@@ -152,6 +154,7 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
       <div style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" as any }}>
         {tab === "edit" && <NanoEditTab device={device} customers={customers} />}
         {tab === "live" && <NanoLiveTab device={device} />}
+        {tab === "health" && <NanoHealthTab device={device} />}
         {tab === "config" && <NanoConfigTab device={device} />}
         {tab === "history" && <NanoHistoryTab device={device} />}
         {tab === "commands" && <NanoCommandsTab device={device} />}
