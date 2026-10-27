@@ -71,6 +71,9 @@ const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen
   // Remote-stop holds: in every frame, but only from firmware ee911e6 / 577bcbc on.
   { col: 'low_water_stop', pid: 'P-4139', conditional: true, gen: 'v3' },
   { col: 'battery_system_mismatch', pid: 'P-4138', conditional: true, gen: 'v3' },
+  { col: 'can_fuel_l', pid: 'P-4140', conditional: true, gen: 'v3' },
+  { col: 'fuel_spent_l', pid: 'P-4141', conditional: true, gen: 'v3' },
+  { col: 'fuel_burned_l', pid: 'P-4142', conditional: true, gen: 'v3' },
   { col: 'ps_overtemp', pid: 'P-4099', conditional: false, gen: 'gen2' },
   { col: 'active_bearer', pid: 'P-4100', conditional: false, gen: 'both' },
   { col: 'rssi', pid: 'P-4101', conditional: false, gen: 'both' },
@@ -126,6 +129,7 @@ export async function GET(request: NextRequest) {
          s.power_source, s.backup_batt_v, s.backup_batt_pct, s.backup_charge_state,
          s.power_loss_events, s.last_power_loss, s.backup_selftest,
          s.low_water_stop, s.battery_system_mismatch,
+         s.can_fuel_l, s.fuel_spent_l, s.fuel_burned_l,
          s.last_lat, s.last_lon, s.gps_fix, s.gps_sat,
          s.active_faults, s.d AS raw_d
        FROM devices d

@@ -66,7 +66,7 @@ const GROUPS: Group[] = [
   { title: "Power & Backup Battery", icon: "🔋", color: "#16a34a", bg: "#f0fdf4",
     pids: ["P-4131", "P-4132", "P-4133", "P-4134", "P-4135", "P-4136", "P-4137"] },
   { title: "Engine (CAN / Modbus)", icon: "🚛", color: "#7c3aed", bg: "#f5f3ff",
-    pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117"] },
+    pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117", "P-4140", "P-4141", "P-4142"] },
 ];
 
 const FW_LABEL: Record<NanoVariant, string> = {
