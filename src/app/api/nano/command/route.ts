@@ -1,7 +1,7 @@
 // ============================================================================
 // API ROUTE: /api/nano/command   (POST)
 // ----------------------------------------------------------------------------
-// Body: { device_id, verb: 'set'|'stop'|'start'|'get'|'getall'|'reboot', pid?, value?, confirm? }
+// Body: { device_id, verb: 'set'|'stop'|'start'|'get'|'getall'|'reboot'|'rs485', pid?, value?, confirm? }
 //   or  { device_id, text: 'set P-5021 24V', confirm? }   — typed in the Config
 //       tab's command box; parsed by lib/nano-console into the same verbs.
 //
@@ -21,6 +21,12 @@
 // reboot (firmware 4b74d6a) restarts the device about 4 s after it acks with
 // {"t":"cfg","id":"reboot","res":"rebooting"}. Needs confirm:true: the stop
 // line is undriven for about a second during reset.
+//
+// rs485 (typed "rs485 scan 1 20" / "rs485 read 0 10 1 4") probes the RS485 /
+// Modbus bus: {"cmd":"rs485","val":"<args>"}, logged with pid 'rs485'. The
+// device answers when the bus job ends (up to ~10 s for a scan) with
+// {"t":"cfg","id":"rs485","val":"<result>","res":"ok"|"failed"}; nano_ingest
+// keeps the result text in reply_text. One job at a time per unit.
 // Validates against nano_registry (Cloud-settable RW or WO), guards P-802
 // (moves electrolyser current — needs confirm:true), logs to nano_commands
 // (pending, then sent once published), publishes the /cmd frame. The
@@ -36,7 +42,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { publishNanoCommand } from '@/lib/nano-mqtt';
-import { parseConsoleCommand } from '@/lib/nano-console';
+import { parseConsoleCommand, NANO_VALUE_MAX } from '@/lib/nano-console';
 
 const DANGEROUS = new Set(['P-802']); // moves real current at the cell
 
@@ -83,7 +89,7 @@ export async function POST(request: NextRequest) {
       value = 'value' in parsed ? parsed.value : undefined;
     }
 
-    if (!device_id || !['set', 'stop', 'start', 'get', 'getall', 'reboot'].includes(verb)) {
+    if (!device_id || !['set', 'stop', 'start', 'get', 'getall', 'reboot', 'rs485'].includes(verb)) {
       return NextResponse.json({ success: false, error: 'device_id and a valid verb are required' }, { status: 400 });
     }
 
@@ -110,6 +116,14 @@ export async function POST(request: NextRequest) {
         );
       }
       payload = { cmd: 'reboot' }; rpid = 'reboot';
+    } else if (verb === 'rs485') {
+      // Typed commands arrive checked by parseConsoleCommand; the firmware is
+      // the judge either way (only scan and read, bus on, one job at a time).
+      const args = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+      if (!/^(scan|read)\b/i.test(args) || args.length > NANO_VALUE_MAX) {
+        return NextResponse.json({ success: false, error: "'rs485' needs value 'scan [lo] [hi]' or 'read <start> <count> [slave] [fc]'" }, { status: 400 });
+      }
+      payload = { cmd: 'rs485', val: args }; rpid = 'rs485'; rval = args;
     } else if (verb === 'get') {
       if (!pid) {
         return NextResponse.json({ success: false, error: "'get' needs pid" }, { status: 400 });

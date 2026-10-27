@@ -586,6 +586,25 @@ class DB:
                 correlated = cur.rowcount
             self.conn.commit()
             return pid, res, correlated
+        if pid == "rs485":
+            # Remote RS485 / Modbus probe ({"cmd":"rs485"}): not a parameter.
+            # The result comes when the bus job ends (a scan can take ~10 s):
+            # res "ok" or "failed", val = the result text, kept in reply_text.
+            # Any other res is an immediate refusal (bus off, busy, bad args).
+            if res in ("ok", "failed"):
+                status, reason, reply = res, None, _text(val)
+            else:
+                status, reason, reply = "nack", res, None
+            with self._cur() as cur:
+                cur.execute("""
+                    UPDATE nano_commands SET status=%s, result_reason=%s, reply_text=%s, resolved_at=now()
+                     WHERE id = (SELECT id FROM nano_commands
+                                  WHERE device_id=%s AND verb='rs485' AND status IN ('pending','sent')
+                                  ORDER BY sent_at DESC LIMIT 1);
+                """, (status, reason, reply, device_id))
+                correlated = cur.rowcount
+            self.conn.commit()
+            return pid, res, correlated
         with self._cur() as cur:
             cur.execute(PARAM_UPSERT, (
                 device_id, pid,

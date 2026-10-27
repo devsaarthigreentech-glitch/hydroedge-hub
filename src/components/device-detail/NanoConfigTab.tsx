@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Device } from "@/types";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { CONSOLE_EXAMPLES } from "@/lib/nano-console";
 
 // ── Types matching /api/nano/config ─────────────────────────────────────────
 interface Param {
@@ -420,7 +421,7 @@ export function NanoConfigTab({ device }: { device: Device }) {
             </form>
             {cmdErr && <div style={{ marginTop: 5, fontSize: 10, color: C.red }}>{cmdErr}</div>}
             <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {["set P-5021 24V", "get P-5021", "getall", "reboot"].map((ex) => (
+              {CONSOLE_EXAMPLES.map((ex) => (
                 <button key={ex} type="button" onClick={() => { setCmdText(ex); setCmdErr(null); }}
                   title="Fill the box with this example"
                   style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 4, padding: "1px 6px", color: C.dim, fontSize: 9, fontFamily: "monospace", cursor: "pointer" }}>
@@ -444,6 +445,8 @@ export function NanoConfigTab({ device }: { device: Device }) {
                 </div>
                 {/* What a get returned (val of the device's t:cfg reply; up to 95 chars, e.g. a SHA-256) */}
                 {e.verb === "get" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 9, color: C.green, fontFamily: "monospace", wordBreak: "break-all" }}>= {e.reply_text}</div>}
+                {/* rs485 scan/read result text (up to ~400 chars), wrapped in full */}
+                {e.verb === "rs485" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 9, color: e.status === "ok" ? C.green : C.amber, fontFamily: "monospace", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{e.reply_text}</div>}
                 {e.result_reason && <div style={{ marginTop: 3, fontSize: 9, color: C.red, fontFamily: "monospace" }}>{e.result_reason}</div>}
               </div>
             ))}

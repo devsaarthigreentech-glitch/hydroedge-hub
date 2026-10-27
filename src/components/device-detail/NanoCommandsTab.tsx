@@ -217,6 +217,8 @@ export function NanoCommandsTab({ device }: { device: Device }) {
               </div>
               {/* What a get returned (val of the device's t:cfg reply; up to 95 chars, e.g. a SHA-256) */}
               {e.verb === "get" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 10, color: C.green, fontFamily: "monospace", wordBreak: "break-all" }}>= {e.reply_text}</div>}
+                {/* rs485 scan/read result text (up to ~400 chars), wrapped in full */}
+                {e.verb === "rs485" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 10, color: e.status === "ok" ? C.green : C.amber, fontFamily: "monospace", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{e.reply_text}</div>}
               {e.result_reason && <div style={{ marginTop: 3, fontSize: 9, color: C.red, fontFamily: "monospace" }}>{e.result_reason}</div>}
             </div>
           ))}
