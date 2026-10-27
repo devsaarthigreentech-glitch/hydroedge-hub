@@ -20,10 +20,13 @@ interface Param {
   auth_req: boolean;
   notes: string | null;
   cloud_settable: boolean;
+  generations: Generation[];
   current_value: string | null;
   current_res: string | null;
   current_ts: string | null;
 }
+type Generation = "NanoV3" | "Gen2";
+type GenView = Generation | "All";
 interface Category { name: string; params: Param[]; editable: number; }
 interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; reply_text: string | null; sent_at: string; }
 
@@ -59,6 +62,30 @@ const MAX_LEN: Record<string, number> = { "P-4210": 95, "P-4211": 95, "P-4212": 
   ...Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].flatMap((k) => [[`P-423${k}`, 95], [`P-424${k}`, 95]])),
 };
 
+// Firmware generation toggle. The registry holds Gen 2 (nano_iot_firmware) and
+// NanoV3 parameters side by side (migration 030 says which is which); 53 IDs
+// are shared and show in both views.
+const GEN_VIEWS: Array<{ id: GenView; label: string }> = [
+  { id: "NanoV3", label: "NanoV3" }, { id: "Gen2", label: "Gen 2" }, { id: "All", label: "All" },
+];
+const genKey = (deviceId: string) => `nanoConfigGen:${deviceId}`;
+
+// Gen 2 parameter -> its NanoV3 counterpart(s), shown as a hint in the Gen 2 view.
+const pidRange = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => `P-${a + i}`);
+const V3_EQUIV: Record<string, string[]> = {
+  "P-3020": ["P-5021"], "P-4040": ["P-5020"], "P-4043": ["P-5026", "P-5027"],
+  "P-4044": ["P-5028"], "P-4045": ["P-5028"], "P-801": ["P-5201"], "P-806": ["P-5200"],
+  // Modbus -> RS485: same settings, different order
+  "P-901": ["P-5500"], "P-902": ["P-5504"], "P-903": ["P-5501"], "P-904": ["P-5502"], "P-905": ["P-5503"],
+  "P-1601": pidRange(5300, 5304), "P-1602": ["P-5300"],
+  "P-1001": ["P-5102"], "P-1002": ["P-5102", "P-5105", "P-5106"], "P-1003": ["P-5105", "P-5106"],
+  "P-3058": ["P-5103"], "P-3042": ["P-5110"], "P-3056": ["P-5111"], "P-3057": ["P-5112"],
+  "P-3043": ["P-5700"], "P-3027": ["P-5701", "P-5702"], "P-3029": ["P-5702"], "P-3028": ["P-5709"],
+  "P-1004": ["P-5040", "P-5041"], "P-1203": ["P-5040", "P-5041"], "P-4020": ["P-5040", "P-5041"],
+  "P-4088": ["P-4110", "P-4111"], "P-4089": ["P-4112"], "P-4094": ["P-4118"],
+  "P-702": ["P-1301", "P-1302"], "P-703": ["P-1301", "P-1302"], "P-704": ["P-1301", "P-1302"],
+};
+
 const C = {
   railBg: "#151515", rowBg: "#1a1a1a", border: "#2a2a2a", field: "#111",
   text: "#e2e8f0", dim: "#6b7280", faint: "#525252",
@@ -69,7 +96,8 @@ const C = {
 export function NanoConfigTab({ device }: { device: Device }) {
   const isMobile = useIsMobile();
   const [categories, setCategories] = useState<Category[]>([]);
-  const [counts, setCounts] = useState({ total: 0, editable: 0, readonly: 0 });
+  const [firmware, setFirmware] = useState<string | null>(null);
+  const [genView, setGenViewState] = useState<GenView | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set(["HHO Control"]));
   const [search, setSearch] = useState("");
@@ -85,18 +113,55 @@ export function NanoConfigTab({ device }: { device: Device }) {
   const [cmdErr, setCmdErr] = useState<string | null>(null);
   const [cmdBusy, setCmdBusy] = useState(false);
 
+  // Generation view: the choice remembered for this device in this browser,
+  // else the device's own firmware (NanoV3 unless its frames say Gen 2).
+  useEffect(() => {
+    if (genView || !firmware) return;
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(genKey(device.id)); } catch { /* private mode */ }
+    setGenViewState(GEN_VIEWS.some((g) => g.id === saved) ? (saved as GenView) : firmware === "gen2" ? "Gen2" : "NanoV3");
+  }, [device.id, firmware, genView]);
+  const setGenView = (g: GenView) => {
+    setGenViewState(g);
+    try { localStorage.setItem(genKey(device.id), g); } catch { /* not remembered */ }
+  };
+  const view: GenView = genView ?? "NanoV3";
+
+  // Categories narrowed to the chosen generation; counts follow.
+  const genCategories = useMemo(() => categories
+    .map((c) => {
+      const params = view === "All" ? c.params : c.params.filter((p) => p.generations.includes(view));
+      return { ...c, params, editable: params.filter((p) => p.cloud_settable).length };
+    })
+    .filter((c) => c.params.length > 0), [categories, view]);
+  const editableCount = useMemo(() => genCategories.reduce((n, c) => n + c.editable, 0), [genCategories]);
+
   const catMap = useMemo(() => {
     const m: Record<string, Category> = {};
-    categories.forEach((c) => (m[c.name] = c));
+    genCategories.forEach((c) => (m[c.name] = c));
     return m;
-  }, [categories]);
+  }, [genCategories]);
+
+  // A category can be empty in the other generation: fall back to the first one shown.
+  useEffect(() => {
+    if (selected && genCategories.length && !catMap[selected]) {
+      setSelected(catMap["Current Control"] ? "Current Control" : genCategories[0].name);
+    }
+  }, [selected, catMap, genCategories]);
+
+  // From a Gen 2 hint to the NanoV3 parameter(s): one PID, or the shared prefix of a group.
+  const showV3 = (pids: string[]) => {
+    setGenView("NanoV3");
+    setShowFlags(false);
+    setSearch(pids.length === 1 ? pids[0] : pids[0].slice(0, -1));
+  };
 
   const loadConfig = useCallback(async () => {
     const res = await fetch(`/api/nano/config?device_id=${device.id}`);
     const data = await res.json();
     if (data.success) {
       setCategories(data.data.categories);
-      setCounts(data.data.counts);
+      setFirmware(data.data.firmware ?? "unknown");
       if (!selected && data.data.categories.length) {
         const firstHHO = data.data.categories.find((c: Category) => c.name === "Current Control");
         setSelected(firstHHO ? "Current Control" : data.data.categories[0].name);
@@ -214,7 +279,7 @@ export function NanoConfigTab({ device }: { device: Device }) {
   // ── Which params to show ──
   const visibleParams: Param[] = useMemo(() => {
     let list: Param[] = search
-      ? categories.flatMap((c) => c.params)
+      ? genCategories.flatMap((c) => c.params)
       : selected ? (catMap[selected]?.params || []) : [];
     if (editableOnly) list = list.filter((p) => p.cloud_settable);
     if (search) {
@@ -222,7 +287,7 @@ export function NanoConfigTab({ device }: { device: Device }) {
       list = list.filter((p) => p.name.toLowerCase().includes(q) || p.pid.toLowerCase().includes(q));
     }
     return list;
-  }, [search, selected, catMap, categories, editableOnly]);
+  }, [search, selected, catMap, genCategories, editableOnly]);
 
   const flags = useMemo(
     () => categories.flatMap((c) => c.params).filter((p) => FLAG_PIDS.includes(p.pid)),
@@ -239,13 +304,14 @@ export function NanoConfigTab({ device }: { device: Device }) {
       {!isMobile && (
         <div style={{ width: 230, minWidth: 230, background: C.railBg, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: 10, borderBottom: `1px solid ${C.border}` }}>
+            <GenToggle view={view} onChange={setGenView} firmware={firmware} />
             <input
               value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search all params…"
               style={{ width: "100%", boxSizing: "border-box", background: C.field, border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 10px", color: C.text, fontSize: 12, outline: "none", fontFamily: "inherit" }}
             />
             <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 11, color: C.dim, cursor: "pointer" }}>
               <input type="checkbox" checked={editableOnly} onChange={(e) => setEditableOnly(e.target.checked)} />
-              Editable only ({counts.editable})
+              Editable only ({editableCount})
             </label>
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: 8 }}>
@@ -286,7 +352,8 @@ export function NanoConfigTab({ device }: { device: Device }) {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Mobile search / filter */}
         {isMobile && (
-          <div style={{ padding: 10, borderBottom: `1px solid ${C.border}`, background: C.railBg, display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ padding: 10, borderBottom: `1px solid ${C.border}`, background: C.railBg, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ width: "100%" }}><GenToggle view={view} onChange={setGenView} firmware={firmware} /></div>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search params…"
               style={{ flex: 1, background: C.field, border: `1px solid ${C.border}`, borderRadius: 6, padding: "7px 10px", color: C.text, fontSize: 13, outline: "none", fontFamily: "inherit" }} />
             <label style={{ fontSize: 11, color: C.dim, display: "flex", alignItems: "center", gap: 4 }}>
@@ -329,7 +396,8 @@ export function NanoConfigTab({ device }: { device: Device }) {
           {!showFlags && visibleParams.map((p) => (
             <ParamRow key={p.pid} p={p} value={edits[p.pid] ?? (p.access === "WO" ? "" : (p.current_value ?? p.default_value ?? ""))} changed={changed.has(p.pid)}
               onChange={(v) => setEdit(p.pid, v)} onSet={async () => { const ok = await sendOne(p.pid, edits[p.pid] ?? (p.current_value ?? "")); if (ok) { setChanged((s) => { const n = new Set(s); n.delete(p.pid); return n; }); loadLog(); setTimeout(loadConfig, 1500); } }}
-              onGet={() => getOne(p.pid)} />
+              onGet={() => getOne(p.pid)}
+              v3Equiv={view !== "NanoV3" && !p.generations.includes("NanoV3") ? V3_EQUIV[p.pid] : undefined} onShowV3={showV3} />
           ))}
         </div>
       </div>
@@ -390,6 +458,24 @@ function btn(active: boolean): React.CSSProperties {
   return { background: active ? C.accentBg : "transparent", border: `1px solid ${active ? C.accentBd : C.border}`, borderRadius: 6, padding: "5px 10px", color: active ? "#c4b5fd" : C.dim, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
 }
 
+function GenToggle({ view, onChange, firmware }: { view: GenView; onChange: (g: GenView) => void; firmware: string | null }) {
+  const fw = firmware === "v3" ? "NanoV3" : firmware === "gen2" ? "Gen 2" : null;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", background: C.field, border: `1px solid ${C.border}`, borderRadius: 6, padding: 2 }}>
+        {GEN_VIEWS.map((g) => (
+          <button key={g.id} onClick={() => onChange(g.id)}
+            title={g.id === "All" ? "Both generations" : `Only parameters in the ${g.label} firmware (shared IDs show in both)`}
+            style={{ flex: 1, background: view === g.id ? C.accentBg : "transparent", border: `1px solid ${view === g.id ? C.accentBd : "transparent"}`, borderRadius: 4, padding: "4px 0", color: view === g.id ? "#c4b5fd" : C.dim, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            {g.label}
+          </button>
+        ))}
+      </div>
+      {fw && <div style={{ marginTop: 4, fontSize: 9, color: C.faint }}>This device reports {fw} firmware.</div>}
+    </div>
+  );
+}
+
 function FlagTable({ flags }: { flags: Param[] }) {
   const cell: React.CSSProperties = { padding: "7px 10px", fontSize: 12, borderBottom: `1px solid ${C.border}`, textAlign: "left" };
   const groups: Array<{ title: string; hint: string; rows: Param[] }> = [
@@ -432,7 +518,7 @@ function FlagTable({ flags }: { flags: Param[] }) {
   );
 }
 
-function ParamRow({ p, value, changed, onChange, onSet, onGet }: { p: Param; value: string; changed: boolean; onChange: (v: string) => void; onSet: () => void; onGet: () => void; }) {
+function ParamRow({ p, value, changed, onChange, onSet, onGet, v3Equiv, onShowV3 }: { p: Param; value: string; changed: boolean; onChange: (v: string) => void; onSet: () => void; onGet: () => void; v3Equiv?: string[]; onShowV3: (pids: string[]) => void; }) {
   const editable = p.cloud_settable;
   const restart = p.notes?.includes("runtime_change=N");
   const field: React.CSSProperties = { background: C.field, border: `1px solid ${C.border}`, borderRadius: 5, padding: "6px 8px", color: C.text, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", width: "100%" };
@@ -454,6 +540,12 @@ function ParamRow({ p, value, changed, onChange, onSet, onGet }: { p: Param; val
           {!editable && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: "rgba(107,114,128,0.15)", color: C.dim }}>{p.access}{p.access === "RW" ? " · not cloud" : ""}</span>}
           {restart && <span style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: "rgba(251,191,36,0.12)", color: C.amber }}>restart</span>}
           {p.auth_req && <span style={{ fontSize: 8, color: C.faint }}>🔒</span>}
+          {v3Equiv && (
+            <span onClick={() => onShowV3(v3Equiv)} title="Show the NanoV3 parameter"
+              style={{ fontSize: 8, padding: "1px 5px", borderRadius: 3, background: C.accentBg, color: "#c4b5fd", cursor: "pointer" }}>
+              NanoV3 uses {v3Equiv.join(" / ")}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
           {p.current_value !== null && p.current_value !== undefined ? (
