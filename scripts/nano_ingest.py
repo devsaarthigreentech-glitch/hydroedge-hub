@@ -147,6 +147,14 @@ V3_CONDITIONAL = {
     "P-4141": "fuel_spent_l",          # P-5604 set
     "P-4142": "fuel_burned_l",         # a fuel rate seen
     "P-4225": "can_capture_state",     # firmware 28bc6a1 on (migration 027)
+    "P-4150": "can_ch1",              # mapped + fresh (migration 029)
+    "P-4151": "can_ch2",
+    "P-4152": "can_ch3",
+    "P-4153": "can_ch4",
+    "P-4154": "can_ch5",
+    "P-4155": "can_ch6",
+    "P-4156": "can_ch7",
+    "P-4157": "can_ch8",
 }
 PID_COL = {**ALWAYS, **CONDITIONAL, **V3_ALWAYS, **V3_CONDITIONAL}
 
@@ -177,6 +185,8 @@ STATE_COLS = [
     "can_fuel_l", "fuel_spent_l", "fuel_burned_l",
     # NanoV3 remote CAN capture (migration 027)
     "can_capture_state",
+    # NanoV3 spare Custom CAN channels (migration 029)
+    "can_ch1", "can_ch2", "can_ch3", "can_ch4", "can_ch5", "can_ch6", "can_ch7", "can_ch8",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
     "active_faults", "d",
 ]
@@ -436,7 +446,7 @@ class DB:
             missing = [c for c in STATE_COLS if c not in have]
             if missing:
                 sys.exit("nano_device_state is missing column(s) %s — apply "
-                         "the nanov3 state-column migrations in db/migrations (009, 012, 014, 022, 024, 026, 027) first."
+                         "the nanov3 state-column migrations in db/migrations (009, 012, 014, 022, 024, 026, 027, 029) first."
                          % ", ".join(missing))
 
             # _close_command stores the reply value on the command it closes

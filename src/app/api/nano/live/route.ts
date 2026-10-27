@@ -29,6 +29,10 @@ import { detectVariant, pidMeta, NanoVariant } from '@/lib/nano-pids';
 // Modbus/optional-sensor values that are absent (NULL) when the source isn't
 // reporting — never 0. `gen` = which firmware publishes it ('both' | 'gen2' | 'v3').
 type Gen = 'both' | 'gen2' | 'v3';
+// Spare Custom CAN channel value -> the parameter holding its display label.
+const CHANNEL_LABEL: Record<string, string> = Object.fromEntries(
+  [0, 1, 2, 3, 4, 5, 6, 7].map((k) => [`P-415${k}`, `P-424${k}`])
+);
 const NUMERIC_TYPES = new Set(['float', 'int', 'uint', 'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32']);
 const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen }> = [
   { col: 'cell_current', pid: 'P-4075', conditional: false, gen: 'both' },
@@ -75,6 +79,14 @@ const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen
   { col: 'can_fuel_l', pid: 'P-4140', conditional: true, gen: 'v3' },
   { col: 'fuel_spent_l', pid: 'P-4141', conditional: true, gen: 'v3' },
   { col: 'fuel_burned_l', pid: 'P-4142', conditional: true, gen: 'v3' },
+  { col: 'can_ch1', pid: 'P-4150', conditional: true, gen: 'v3' },
+  { col: 'can_ch2', pid: 'P-4151', conditional: true, gen: 'v3' },
+  { col: 'can_ch3', pid: 'P-4152', conditional: true, gen: 'v3' },
+  { col: 'can_ch4', pid: 'P-4153', conditional: true, gen: 'v3' },
+  { col: 'can_ch5', pid: 'P-4154', conditional: true, gen: 'v3' },
+  { col: 'can_ch6', pid: 'P-4155', conditional: true, gen: 'v3' },
+  { col: 'can_ch7', pid: 'P-4156', conditional: true, gen: 'v3' },
+  { col: 'can_ch8', pid: 'P-4157', conditional: true, gen: 'v3' },
   { col: 'ps_overtemp', pid: 'P-4099', conditional: false, gen: 'gen2' },
   { col: 'active_bearer', pid: 'P-4100', conditional: false, gen: 'both' },
   { col: 'rssi', pid: 'P-4101', conditional: false, gen: 'both' },
@@ -131,6 +143,7 @@ export async function GET(request: NextRequest) {
          s.power_loss_events, s.last_power_loss, s.backup_selftest,
          s.low_water_stop, s.battery_system_mismatch,
          s.can_fuel_l, s.fuel_spent_l, s.fuel_burned_l,
+         s.can_ch1, s.can_ch2, s.can_ch3, s.can_ch4, s.can_ch5, s.can_ch6, s.can_ch7, s.can_ch8,
          s.last_lat, s.last_lon, s.gps_fix, s.gps_sat,
          s.active_faults, s.d AS raw_d
        FROM devices d
@@ -197,6 +210,15 @@ export async function GET(request: NextRequest) {
     const reg: Record<string, any> = {};
     regRes.rows.forEach((r: any) => (reg[r.pid] = r));
 
+    // Spare Custom CAN channels P-4150..P-4157 are titled by the label the
+    // device holds for them (P-4240..P-4247, from its config writebacks).
+    const labelRes = await query(
+      `SELECT pid, value_text FROM nano_param_values WHERE device_id = $1 AND pid = ANY($2)`,
+      [deviceId, Object.values(CHANNEL_LABEL)]
+    );
+    const labels: Record<string, string> = {};
+    labelRes.rows.forEach((r: any) => { if (r.value_text && r.value_text.trim()) labels[r.pid] = r.value_text.trim(); });
+
     const measured = MEASURED.filter((m) => showsGen(firmware, m.gen)).map((m) => {
       const r = reg[m.pid] || {};
       const local = pidMeta(m.pid, firmware);
@@ -212,7 +234,7 @@ export async function GET(request: NextRequest) {
       const levelV3 = firmware === 'v3' && ['P-4096', 'P-4097', 'P-4098'].includes(m.pid);
       return {
         pid: m.pid,
-        name: (levelV3 ? local?.name : r.name) || local?.name || m.col,
+        name: (CHANNEL_LABEL[m.pid] && labels[CHANNEL_LABEL[m.pid]]) || (levelV3 ? local?.name : r.name) || local?.name || m.col,
         value,
         unit: r.units || local?.unit || null,   // an empty registry unit falls back too
         category: r.category ?? 'Other',
@@ -221,7 +243,8 @@ export async function GET(request: NextRequest) {
         bool_kind: local?.bool ?? null,
         present: value !== null && value !== undefined,
       };
-    });
+    // A spare channel that is not reporting and has no label is unused: no card.
+    }).filter((m) => !(CHANNEL_LABEL[m.pid] && !m.present && !labels[CHANNEL_LABEL[m.pid]]));
 
     // Active faults resolved from the catalog (ordered by severity)
     const faultCodes: string[] = Array.isArray(row.active_faults) ? row.active_faults : [];

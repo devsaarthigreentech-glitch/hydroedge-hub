@@ -66,7 +66,8 @@ const GROUPS: Group[] = [
   { title: "Power & Backup Battery", icon: "🔋", color: "#16a34a", bg: "#f0fdf4",
     pids: ["P-4131", "P-4132", "P-4133", "P-4134", "P-4135", "P-4136", "P-4137"] },
   { title: "Engine (CAN / Modbus)", icon: "🚛", color: "#7c3aed", bg: "#f5f3ff",
-    pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117", "P-4140", "P-4141", "P-4142"] },
+    pids: ["P-4103", "P-4104", "P-4105", "P-4106", "P-4107", "P-4108", "P-4115", "P-4116", "P-4117", "P-4140", "P-4141", "P-4142",
+            "P-4150", "P-4151", "P-4152", "P-4153", "P-4154", "P-4155", "P-4156", "P-4157"] },
 ];
 
 const FW_LABEL: Record<NanoVariant, string> = {
@@ -351,7 +352,7 @@ function renderValue(m: Measured): { text: string; muted?: boolean; color?: stri
   }
   if (typeof v === "number") {
     const d = m.unit != null ? DECIMALS[m.unit] : undefined;
-    const n = d === undefined || Number.isInteger(v) ? String(v) : v.toFixed(d);
+    const n = Number.isInteger(v) ? String(v) : d === undefined ? String(Number(v.toFixed(3))) : v.toFixed(d);
     return { text: m.unit ? `${n} ${m.unit}` : n };
   }
   return { text: String(v) };
