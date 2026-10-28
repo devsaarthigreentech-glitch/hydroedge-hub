@@ -26,6 +26,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
     // millivolts on submit, which is how devices.set_ain1_raw stores it.
     set_ain1_volts: device.set_ain1_raw != null ? String(device.set_ain1_raw / 1000) : "",
     weekly_report: device.weekly_report || "auto",
+    alerts_enabled: device.alerts_enabled !== false,
     customer_id: device.customer_id || "",
     notes: device.notes || "",
     tested: device.tested || false,
@@ -105,6 +106,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             ? null
             : parseFloat((Number(formData.set_ain1_volts) * 1000).toFixed(2)),
           weekly_report: formData.weekly_report,
+          alerts_enabled: formData.alerts_enabled,
           customer_id: formData.customer_id,
           notes: formData.notes,
           tested: formData.tested,
@@ -298,6 +300,47 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
             )}
             {formData.weekly_report === "never" && (
               <>Left out of the weekly report regardless of activity. Alerts are unaffected.</>
+            )}
+          </div>
+        </div>
+
+        {/* Alert emails — off for decommissioned / not-yet-installed units */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>Alert Emails</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[
+              { on: true,  text: "On — monitor this device" },
+              { on: false, text: "Off — decommissioned / not installed" },
+            ].map((opt) => {
+              const selected = formData.alerts_enabled === opt.on;
+              const color = opt.on ? "#16a34a" : "#dc2626";
+              return (
+                <button
+                  key={String(opt.on)}
+                  type="button"
+                  onClick={() => setFormData({ ...formData, alerts_enabled: opt.on })}
+                  style={{
+                    flex: 1, padding: "10px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700,
+                    fontFamily: "inherit", cursor: "pointer",
+                    background: selected ? color : "white",
+                    color: selected ? "white" : THEME.text.secondary,
+                    border: `2px solid ${selected ? color : THEME.border.light}`,
+                  }}
+                >
+                  {opt.text}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: formData.alerts_enabled ? THEME.text.tertiary : "#dc2626", marginTop: 6, lineHeight: 1.5 }}>
+            {formData.alerts_enabled ? (
+              <>Faults on this device go into the customer&apos;s daily summary and the support digest.</>
+            ) : (
+              <>
+                This device is <strong>skipped by the alert scan</strong> — no customer summary, support
+                digest or urgent email will mention it, including &ldquo;no data received&rdquo;. Its open
+                faults are closed when you save. Turn it back on once the unit is installed.
+              </>
             )}
           </div>
         </div>

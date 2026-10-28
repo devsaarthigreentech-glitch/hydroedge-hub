@@ -3124,6 +3124,9 @@ export async function POST(request: NextRequest) {
       WHERE d.device_type = 'FMC650'
         AND d.asset_name IN ('DG', 'EOW')
         AND d.deleted_at IS NULL
+        -- Per-device switch on the Edit tab (migration 020). Read through
+        -- to_jsonb so the scan keeps running if 020 is not applied yet.
+        AND COALESCE((to_jsonb(d) ->> 'alerts_enabled')::boolean, TRUE) = TRUE
         AND COALESCE(das.alerts_enabled, TRUE) = TRUE
         AND COALESCE(c.notifications_enabled, TRUE) = TRUE
         ${customerFilter}

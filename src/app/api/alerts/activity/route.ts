@@ -40,6 +40,7 @@ export async function GET() {
            SELECT 1 FROM devices d
             WHERE d.customer_id = c.id AND d.deleted_at IS NULL
               AND d.device_type = 'FMC650' AND d.asset_name IN ('DG', 'EOW')
+              AND COALESCE((to_jsonb(d) ->> 'alerts_enabled')::boolean, TRUE)
          )
          ${scope ? "AND c.id = $1" : ""}
        ORDER BY c.name
@@ -53,6 +54,9 @@ export async function GET() {
         FROM alert_episodes e
         LEFT JOIN devices d ON d.id = e.device_id
        WHERE (e.cleared_at IS NULL OR e.cleared_at > NOW() - INTERVAL '48 hours')
+         -- A muted (decommissioned) or deleted device drops off the screen.
+         AND d.deleted_at IS NULL
+         AND COALESCE((to_jsonb(d) ->> 'alerts_enabled')::boolean, TRUE)
          ${scope ? "AND e.customer_id = $1" : ""}
        ORDER BY (e.cleared_at IS NULL) DESC, e.severity, e.first_seen_at DESC
     `, p);

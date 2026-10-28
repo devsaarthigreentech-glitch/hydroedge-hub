@@ -30,7 +30,7 @@ export async function PATCH(
         const { deviceId } = await context.params;
         const body = await request.json();
 
-        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw, weekly_report, fuel_baseline_kmpl } = body;
+        const { device_name, device_type, asset_name, asset_type, sim_number, customer_id, notes, tested, name_lock, system_voltage, set_ain1_raw, weekly_report, alerts_enabled, fuel_baseline_kmpl } = body;
 
         // Fetch current state — needed to evaluate the naming gate correctly,
         // and to know name_locked even while the gate is paused.
@@ -126,6 +126,19 @@ export async function PATCH(
             }
             updates.push(`weekly_report = $${paramCount}`);
             values.push(weekly_report);
+            paramCount++;
+        }
+
+        // Alert emails on/off for this unit — see db/migrations/020.
+        if (alerts_enabled !== undefined) {
+            if (typeof alerts_enabled !== 'boolean') {
+                return NextResponse.json(
+                    { success: false, error: 'alerts_enabled must be true or false' },
+                    { status: 400 }
+                );
+            }
+            updates.push(`alerts_enabled = $${paramCount}`);
+            values.push(alerts_enabled);
             paramCount++;
         }
 
@@ -290,6 +303,21 @@ export async function PATCH(
                 {success: false, error: 'Device not found'},
                 {status : 404}
             );
+        }
+
+        // Muting closes the device's open faults. The scan skips a muted device,
+        // so nothing would ever close them, and unmuting months later would
+        // otherwise resurface them as "ongoing since" a long-gone date.
+        if (alerts_enabled === false) {
+            try {
+                await query(
+                    `UPDATE alert_episodes SET cleared_at = NOW()
+                      WHERE device_id = $1 AND cleared_at IS NULL`,
+                    [deviceId]
+                );
+            } catch {
+                /* alert_episodes absent (migration 019 not applied) — nothing to close */
+            }
         }
 
         return NextResponse.json({

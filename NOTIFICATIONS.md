@@ -16,7 +16,7 @@ created company or user is subscribed unless you say otherwise.
 | --- | --- | --- |
 | `customers.notifications_enabled` | Notifications screen, company row | The company's devices are skipped by the scan. No email, no log entry, nobody at that company is contacted. |
 | `users.notifications_enabled` | Notifications screen (expand a company) or the Users list | That one person is dropped from the recipient list. Their colleagues still get the email. |
-| `device_alert_settings.alerts_enabled` | per-device (pre-existing) | That device is skipped. |
+| `devices.alerts_enabled` | device → Edit tab → **Alert Emails** | That device is skipped entirely — use it for decommissioned or not-yet-installed units. Its open faults are closed on save. (`device_alert_settings.alerts_enabled`, the older switch with no UI, is still honoured; migration 020 copies its mutes across.) |
 
 A person is emailed only when **all** of these hold:
 
@@ -46,6 +46,10 @@ node scripts/apply-migration.js db/migrations/006_daily_digest_and_power_alert.s
 
 ```bash
 node scripts/apply-migration.js db/migrations/019_alert_episodes.sql
+```
+
+```bash
+node scripts/apply-migration.js db/migrations/020_device_alerts_enabled.sql
 ```
 
 `004` adds the subscribe/unsubscribe columns and unsubscribes Turbo Energy,

@@ -105,6 +105,8 @@ export async function GET(request: NextRequest) {
         -- database that has not run 008 yet returns 'auto' instead of failing
         -- the whole device list with a missing-column error.
         COALESCE(to_jsonb(d) ->> 'weekly_report', 'auto') AS weekly_report,
+        -- Per-device alert switch (migration 020), same to_jsonb guard.
+        COALESCE((to_jsonb(d) ->> 'alerts_enabled')::boolean, TRUE) AS alerts_enabled,
         -- Analytics fuel baseline (migration 023), same guard; NULL = default.
         (to_jsonb(d) ->> 'fuel_baseline_kmpl')::numeric AS fuel_baseline_kmpl
       FROM devices d

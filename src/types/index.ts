@@ -58,6 +58,8 @@ export interface Device {
   name_locked?: boolean;
   /** Vehicle electrical system, 12 or 24 V. Drives the external-power alarm. */
   system_voltage?: number | null;
+  /** FALSE = the alert scan skips this device (migration 020). */
+  alerts_enabled?: boolean;
   /**
    * Analytics "Actual vs Baseline" target in km/L (migration 023). NULL/absent =
    * the tab's 10 km/L default. pg returns NUMERIC as a string, hence the union.

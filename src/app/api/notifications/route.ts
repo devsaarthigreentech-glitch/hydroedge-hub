@@ -40,6 +40,7 @@ export async function GET() {
                WHERE d.deleted_at IS NULL
                  AND d.device_type = 'FMC650'
                  AND d.asset_name IN ('DG', 'EOW')
+                 AND COALESCE((to_jsonb(d) ->> 'alerts_enabled')::boolean, TRUE)
              )::int AS alertable_devices
         FROM customers c
         LEFT JOIN devices d ON d.customer_id = c.id
