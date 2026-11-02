@@ -13,9 +13,10 @@ import { NanoAlertsTab } from "../device-detail/NanoAlertsTab";
 import { NanoEditTab } from "../device-detail/NanoEditTab";
 import { NanoCanCaptureTab } from "../device-detail/NanoCanCaptureTab";
 import { NanoHealthTab } from "../device-detail/NanoHealthTab";
+import { NanoMapTab } from "../device-detail/NanoMapTab";
 
 // Local tab set — independent of the shared Teltonika DeviceTab union.
-type NanoTab = "live" | "health" | "edit" | "config" | "commands" | "can" | "alerts" | "history";
+type NanoTab = "live" | "health" | "map" | "edit" | "config" | "commands" | "can" | "alerts" | "history";
 
 interface NanoDeviceDetailProps {
   device: Device;
@@ -73,6 +74,7 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
     { key: "edit", label: "EDIT", icon: <Icons.Edit /> },
     { key: "live", label: "LIVE", icon: <Icons.Telemetry /> },
     { key: "health", label: "HEALTH", icon: <Icons.Chart /> },
+    { key: "map", label: "MAP", icon: <Icons.MapPin /> },
     { key: "config", label: "CONFIG", icon: <Icons.Commands /> },
     { key: "commands", label: "COMMANDS", icon: <Icons.Commands /> },
     { key: "can", label: "CAN CAPTURE", icon: <Icons.Logs /> },
@@ -155,6 +157,7 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
         {tab === "edit" && <NanoEditTab device={device} customers={customers} />}
         {tab === "live" && <NanoLiveTab device={device} />}
         {tab === "health" && <NanoHealthTab device={device} />}
+        {tab === "map" && <NanoMapTab device={device} />}
         {tab === "config" && <NanoConfigTab device={device} />}
         {tab === "history" && <NanoHistoryTab device={device} />}
         {tab === "commands" && <NanoCommandsTab device={device} />}
