@@ -16,7 +16,7 @@ the exact commands to establish **current** state before doing anything.
 |---|---|---|
 | Provider / hostname | DigitalOcean `ubuntu-s-1vcpu-1gb-blr1-01` | Hostinger `srv626585` |
 | IP | `143.244.135.19` | `145.223.19.24` |
-| Size | 1 vCPU / 1 GB RAM — fragile | small VPS |
+| Size | 2 vCPU / 4 GB RAM / 80 GB (resized; the hostname still says 1gb) | small VPS |
 | Database | `sgt_hydroedge` | `sgt_hydroedge_archive` (+ maybe staging table `io_records_prod`, §5) |
 | Repo | `~/sgt-admin-panel/hydroedge-hub`, deployed by `git pull origin main && npm run build && pm2 restart all` | none |
 
@@ -225,7 +225,13 @@ Known-good values to verify against (0015, 2026-08-22): `distance_km 185.96`,
    index-free load, and a place to filter (junk 2015/1970/2185 timestamps,
    duplicate packets, §2) before anything is merged into `io_records`.
 
-   **If the swap has run, it changes everything above:**
+   **Status: swap COMPLETED 2026-10-07.** Cutoff `2026-09-07 00:00+00`. Verify matched
+   455,457,987 = 455,457,987. Archive `io_records_prod` holds **455,964,178** rows (all
+   of old prod), of which **405,059,206** exist only there. Reloaded 50,904,972 rows
+   (11:31 → 12:00 UTC). Prod disk went from 100% to 28% (22 GB used) and was still 27%
+   on 2026-10-10.
+
+   **Because the swap has run, everything above changes:**
    - Prod `io_records` before CUTOFF is gone, for **all** devices. It lives only in
      `io_records_prod` on the archive.
    - `io-logs` only routes 0015/0016, only before 2026-03-24, and only reads the
@@ -313,7 +319,7 @@ sudo -u postgres psql -d sgt_hydroedge_archive -c "SELECT relname, n_live_tup, p
 
 ## 7. Ground rules for whoever picks this up
 
-- Prod is 1 vCPU / 1 GB and shares Postgres with the GPS ingest (python3 on TCP
+- Prod is 2 vCPU / 4 GB (the `1gb` hostname is stale) and shares Postgres with the GPS ingest (python3 on TCP
   1883). One heavy query at a time, never parallel backfills, and anything over a
   few minutes goes in **tmux on the server**. The user's PC sleeping kills
   anything run from it.
