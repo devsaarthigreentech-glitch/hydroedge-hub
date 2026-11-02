@@ -92,6 +92,7 @@ export const PID_META: Record<string, PidMeta> = {
   'P-4140': { name: 'CAN Fuel In Tank', unit: 'L', conditional: true },
   'P-4141': { name: 'Fuel Spent From Level', unit: 'L', conditional: true },
   'P-4142': { name: 'Fuel Burned From Rate', unit: 'L', conditional: true },
+  'P-4228': { name: 'CAN Sim State', conditional: true },
   'P-5250': { name: 'Auto-RCS Zone', conditional: true },
   'P-5251': { name: 'Auto-RCS Reason', conditional: true },
   'P-4123': { name: 'OTA State' },

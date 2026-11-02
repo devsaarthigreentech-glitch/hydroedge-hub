@@ -147,6 +147,7 @@ V3_CONDITIONAL = {
     "P-4141": "fuel_spent_l",          # P-5604 set
     "P-4142": "fuel_burned_l",         # a fuel rate seen
     "P-4225": "can_capture_state",     # firmware 28bc6a1 on (migration 027)
+    "P-4228": "can_sim_state",         # RPM simulator used since boot, 3.0.2 on (migration 033)
     "P-4150": "can_ch1",              # mapped + fresh (migration 029)
     "P-4151": "can_ch2",
     "P-4152": "can_ch3",
@@ -185,6 +186,8 @@ STATE_COLS = [
     "can_fuel_l", "fuel_spent_l", "fuel_burned_l",
     # NanoV3 remote CAN capture (migration 027)
     "can_capture_state",
+    # NanoV3 bench RPM simulator (migration 033)
+    "can_sim_state",
     # NanoV3 spare Custom CAN channels (migration 029)
     "can_ch1", "can_ch2", "can_ch3", "can_ch4", "can_ch5", "can_ch6", "can_ch7", "can_ch8",
     "last_lat", "last_lon", "gps_fix", "gps_sat",
@@ -446,7 +449,7 @@ class DB:
             missing = [c for c in STATE_COLS if c not in have]
             if missing:
                 sys.exit("nano_device_state is missing column(s) %s — apply "
-                         "the nanov3 state-column migrations in db/migrations (009, 012, 014, 022, 024, 026, 027, 029) first."
+                         "the nanov3 state-column migrations in db/migrations (009, 012, 014, 022, 024, 026, 027, 029, 033) first."
                          % ", ".join(missing))
 
             # _close_command stores the reply value on the command it closes

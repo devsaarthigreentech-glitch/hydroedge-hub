@@ -79,6 +79,7 @@ const MEASURED: Array<{ col: string; pid: string; conditional: boolean; gen: Gen
   { col: 'can_fuel_l', pid: 'P-4140', conditional: true, gen: 'v3' },
   { col: 'fuel_spent_l', pid: 'P-4141', conditional: true, gen: 'v3' },
   { col: 'fuel_burned_l', pid: 'P-4142', conditional: true, gen: 'v3' },
+  { col: 'can_sim_state', pid: 'P-4228', conditional: true, gen: 'v3' },
   { col: 'can_ch1', pid: 'P-4150', conditional: true, gen: 'v3' },
   { col: 'can_ch2', pid: 'P-4151', conditional: true, gen: 'v3' },
   { col: 'can_ch3', pid: 'P-4152', conditional: true, gen: 'v3' },
