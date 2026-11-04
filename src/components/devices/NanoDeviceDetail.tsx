@@ -14,9 +14,11 @@ import { NanoEditTab } from "../device-detail/NanoEditTab";
 import { NanoCanCaptureTab } from "../device-detail/NanoCanCaptureTab";
 import { NanoHealthTab } from "../device-detail/NanoHealthTab";
 import { NanoMapTab } from "../device-detail/NanoMapTab";
+import { NanoFirmwareTab } from "../device-detail/NanoFirmwareTab";
+import { useSession } from "next-auth/react";
 
 // Local tab set — independent of the shared Teltonika DeviceTab union.
-type NanoTab = "live" | "health" | "map" | "edit" | "config" | "commands" | "can" | "alerts" | "history";
+type NanoTab = "live" | "health" | "map" | "edit" | "config" | "commands" | "can" | "firmware" | "alerts" | "history";
 
 interface NanoDeviceDetailProps {
   device: Device;
@@ -28,6 +30,8 @@ interface NanoDeviceDetailProps {
 export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDeviceDetailProps) {
   const [tab, setTab] = useState<NanoTab>("live");
   const isMobile = useIsMobile();
+  const { data: session } = useSession();
+  const role = (session?.user as any)?.role;
 
   // ── "Last seen" for a Nano ────────────────────────────────────────────────
   // Nano units are not GPS trackers, so devices.last_location_time is NULL and
@@ -78,6 +82,9 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
     { key: "config", label: "CONFIG", icon: <Icons.Commands /> },
     { key: "commands", label: "COMMANDS", icon: <Icons.Commands /> },
     { key: "can", label: "CAN CAPTURE", icon: <Icons.Logs /> },
+    ...(role === "super_admin" || role === "admin"
+      ? [{ key: "firmware" as NanoTab, label: "FIRMWARE", icon: <Icons.Settings /> }]
+      : []),
     { key: "alerts", label: "ALERTS", icon: <Icons.Info /> },
     { key: "history", label: "HISTORY", icon: <Icons.Logs /> },
   ];
@@ -162,6 +169,7 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
         {tab === "history" && <NanoHistoryTab device={device} />}
         {tab === "commands" && <NanoCommandsTab device={device} />}
         {tab === "can" && <NanoCanCaptureTab device={device} />}
+        {tab === "firmware" && <NanoFirmwareTab device={device} />}
         {tab === "alerts" && <NanoAlertsTab device={device} />}
       </div>
 

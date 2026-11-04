@@ -16,6 +16,7 @@ import { UserList } from "@/components/users/UserList";
 import { AddUserModal } from "@/components/users/AddUserModal";
 import { NotificationSettings } from "@/components/notifications/NotificationSettings";
 import { AlertActivity } from "@/components/notifications/AlertActivity";
+import { FirmwarePage } from "@/components/firmware/FirmwarePage";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { THEME } from "@/lib/theme";
 
@@ -386,6 +387,9 @@ useEffect(() => {
 
           {/* What the alert system saw and sent */}
           {currentView === "alert_activity" && <AlertActivity />}
+
+          {/* Upload NanoV3 firmware (admins) */}
+          {currentView === "firmware" && <FirmwarePage />}
         </div>
       </div>
 

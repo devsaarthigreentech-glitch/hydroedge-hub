@@ -4,7 +4,7 @@ import React from "react";
 import { Icons } from "@/components/ui/Icons";
 import { Customer, ViewType } from "@/types";
 import { THEME } from "@/lib/theme";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -37,6 +37,9 @@ export function Sidebar({
   userCount,
   isMobile = false,
 }: SidebarProps) {
+  const { data: session } = useSession();
+  const role = (session?.user as any)?.role;
+  const isAdmin = role === "super_admin" || role === "admin";
 
   const handleNavClick = (view: ViewType) => {
     onViewChange(view);
@@ -195,6 +198,15 @@ export function Sidebar({
             isOpen={showLabels}
             onClick={() => handleNavClick("alert_activity")}
           />
+          {isAdmin && (
+            <NavButton
+              icon={<Icons.Settings />}
+              label="Firmware"
+              isActive={currentView === "firmware"}
+              isOpen={showLabels}
+              onClick={() => handleNavClick("firmware")}
+            />
+          )}
         </div>
 
         {/* Quick Filters — clicking opens Customer Detail */}
