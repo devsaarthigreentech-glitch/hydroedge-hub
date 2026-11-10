@@ -377,7 +377,7 @@ function Scene({ s, live }: { s: TwinState; live: boolean }) {
       <g>
         <rect x="652" y="196" width="306" height="274" rx="8" fill="url(#gxt-gx)" stroke={K.green} strokeWidth="2" />
         <rect x="652" y="196" width="306" height="44" rx="8" fill="#0a2618" />
-        <text x="668" y="214" fill="#7fc79c" fontFamily={K.sans} fontSize="10" letterSpacing="2">SAARTHI</text>
+        <text x="668" y="214" fill="#7fc79c" fontFamily={K.sans} fontSize="10" letterSpacing="2">SGT</text>
         <text x="668" y="233" fill="#ffffff" fontFamily={K.sans} fontSize="20" fontWeight="700">
           Green<tspan fill={K.yellow}>X</tspan>
         </text>
@@ -574,7 +574,7 @@ function Estimate({ runHours, days, a, setA, loading }: {
   const fuel = runHours === null ? null : runHours * a.burnLph * (a.savingPct / 100);
   const big = (v: string, unit: string, label: string, color: string) => (
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontFamily: K.mono, fontSize: 22, fontWeight: 700, color }}>{v}<span style={{ fontSize: 12, color: K.dim }}> {unit}</span></div>
+      <div style={{ fontFamily: K.mono, fontSize: 24, fontWeight: 700, color }}>{v}<span style={{ fontSize: 12, color: K.dim }}> {unit}</span></div>
       <div style={{ fontSize: 11, color: K.dim, marginTop: 2 }}>{label}</div>
     </div>
   );
@@ -585,13 +585,13 @@ function Estimate({ runHours, days, a, setA, loading }: {
         <span style={{ fontSize: 9, fontFamily: K.mono, letterSpacing: 1.5, color: K.bg, background: K.yellow, borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>ESTIMATE</span>
         <span style={{ fontSize: 11, color: K.faint, marginLeft: "auto" }}>last {days} days</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+      <div data-twin="est-figures" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
         {big(loading ? "…" : hm(runHours), "", "Measured run time (Din.1)", K.text)}
         {big(fuel === null ? "—" : nf(fuel), "L", "Diesel saved", K.greenHi)}
         {big(fuel === null ? "—" : nf((fuel * DIESEL_CO2_KG_PER_L) / 1000, 2), "t", "CO₂ avoided", K.greenHi)}
         {big(fuel === null ? "—" : `₹${nf(fuel * a.dieselInr)}`, "", "Fuel cost saved", K.yellow)}
       </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div data-twin="est-inputs" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <NumberField label="FUEL BURN" unit="L/h" value={a.burnLph} step={1} onChange={(v) => setA({ ...a, burnLph: v })} />
         <NumberField label="SAVING" unit="%" value={a.savingPct} step={0.5} onChange={(v) => setA({ ...a, savingPct: v })} />
         <NumberField label="DIESEL" unit="₹/L" value={a.dieselInr} step={1} onChange={(v) => setA({ ...a, dieselInr: v })} />
@@ -626,7 +626,7 @@ export function DgTwinTab({ device, telemetry }: DgTwinTabProps) {
   }, [device.id]);
   useEffect(() => { loadTrend(); const id = setInterval(loadTrend, 60000); return () => clearInterval(id); }, [loadTrend]);
 
-  // Run hours: today and the estimate window
+  // Run hours: the last 24 h (days=1 is a rolling window) and the estimate window
   const EST_DAYS = 30;
   const [today, setToday] = useState<{ hours: number | null; starts: number | null } | null>(null);
   const [runEst, setRunEst] = useState<number | null>(null);
@@ -714,8 +714,8 @@ export function DgTwinTab({ device, telemetry }: DgTwinTabProps) {
             <Group title="GENERATOR">
               <Row label="Run status" src="Din.1" tone={s.running === null ? "na" : s.running ? "ok" : "off"}
                 value={s.running === null ? "—" : s.running ? "Running" : "Stopped"} />
-              <Row label="Run time today" src="from Din.1" tone="na" value={today ? hm(today.hours) : "…"} />
-              <Row label="Starts today" src="Din.1 off → on" tone="na" value={today?.starts == null ? "…" : String(today.starts)} />
+              <Row label="Run time, last 24 h" src="from Din.1" tone="na" value={today ? hm(today.hours) : "…"} />
+              <Row label="Starts, last 24 h" src="Din.1 off → on" tone="na" value={today?.starts == null ? "…" : String(today.starts)} />
             </Group>
             <Group title="HYDROGEN SYSTEM">
               <Row label="Cell current" src={`Ain.1 · set ${s.setAmps === null ? "not set" : `${s.setAmps.toFixed(1)} A`}`}
