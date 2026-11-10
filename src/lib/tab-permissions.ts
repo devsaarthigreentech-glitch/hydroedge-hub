@@ -9,6 +9,7 @@ export const ALL_DEVICE_TABS = [
     'info',
     'edit',
     'telemetry',
+    'twin',
     'graphs',
     'analytics',
     'commands',
@@ -38,6 +39,11 @@ export const ALL_DEVICE_TABS = [
       label: 'Telemetry',
       icon: '📡',
       description: 'Live telemetry data',
+    },
+    twin: {
+      label: 'Twin',
+      icon: '🏭',
+      description: 'Live digital twin of a DG set with GreenX',
     },
     graphs: {
       label: 'Graphs',
@@ -80,19 +86,20 @@ export const ALL_DEVICE_TABS = [
   
   export const TAB_PERMISSIONS: Record<string, DeviceTab[]> = {
     // End customers — monitoring only (Info + Telemetry + Analytics + Graphs)
-    customer: ['info', 'telemetry', 'analytics', 'graphs','map'],
+    customer: ['info', 'telemetry', 'twin', 'analytics', 'graphs','map'],
   
     // Vendors — same as customer (they supply devices, don't need admin tabs)
-    vendor: ['info', 'telemetry', 'analytics', 'graphs','map'],
+    vendor: ['info', 'telemetry', 'twin', 'analytics', 'graphs','map'],
   
     // Partners — operational access (can edit devices, see logs)
-    partner: ['info', 'edit', 'telemetry', 'graphs', 'analytics', 'logs','map'],
+    partner: ['info', 'edit', 'telemetry', 'twin', 'graphs', 'analytics', 'logs','map'],
   
     // Dealers — full access (they resell your platform, need everything)
     dealer: [
       'info',
       'edit',
       'telemetry',
+      'twin',
       'graphs',
       'analytics',
       'commands',

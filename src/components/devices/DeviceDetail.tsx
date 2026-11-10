@@ -12,6 +12,7 @@ import { LogsTab } from "../device-detail/LogsTab";
 import { timeAgo } from "@/lib/utils";
 import { MapTab } from "../device-detail/MapTab";
 import { AnalyticsTab } from "../device-detail/AnalyticsTab";
+import { DgTwinTab } from "../device-detail/DgTwinTab";
 import { TeltonikaConfigurator } from "../device-detail/TeltonikaConfigurator";
 import { getAllowedTabs } from "@/lib/tab-permissions";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -70,6 +71,8 @@ export function DeviceDetail({
     { key: "info" as DeviceTab, label: "INFO", icon: Icons.Info },
     { key: "edit" as DeviceTab, label: "EDIT", icon: Icons.Edit },
     { key: "telemetry" as DeviceTab, label: "TELEMETRY", icon: Icons.Telemetry },
+    // The digital twin draws a genset and its GreenX unit, so DGs only.
+    ...(device.asset_name === "DG" ? [{ key: "twin" as DeviceTab, label: "TWIN", icon: Icons.Telemetry }] : []),
     { key: "graphs" as DeviceTab, label: "GRAPHS", icon: Icons.TrendingUp },
     { key: "analytics" as DeviceTab, label: "ANALYTICS", icon: Icons.TrendingUp },
     { key: "commands" as DeviceTab, label: "COMMANDS", icon: Icons.Commands },
@@ -377,6 +380,7 @@ export function DeviceDetail({
           />
         )}
         {selectedTab === "graphs" && <TelemetryGraphTab device={device} />}
+        {selectedTab === "twin" && <DgTwinTab device={device} telemetry={telemetry} />}
         {selectedTab === "analytics" && (
           <AnalyticsTab device={device} onSaved={(updatedDevice) => onDeviceUpdated?.(updatedDevice)} />
         )}
