@@ -37,6 +37,7 @@ ENDPOINT=https://sgp1.digitaloceanspaces.com
 ENV_FILE=/root/.spaces-export.env
 CUTOFF='2026-09-07 00:00:00+00'      # prod io_records starts here (offload swap, ARCHIVE_DB.md)
 WORK=/var/tmp/history-split
+TEMP_MAX=18GB                        # DuckDB spill cap; April 2026 peaked near 18 GB as strings
 SOURCES=(io_records_prod archive_io_records)
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a "$WORK/log.txt" >&2; }
@@ -90,21 +91,24 @@ split_month() {
   (( ${#files[@]} )) || { log "$m: no source files"; return 0; }
   local list; list=$(IFS=,; echo "${files[*]}")
 
-  # One pass: load, count, write partitions. Counts land in $dir/counts.csv.
+  # Load, dedupe, write partitions. Counts land in $dir/counts.csv.
+  # Rows are held typed (UUID 16 B, TIMESTAMPTZ 8 B) rather than as strings,
+  # which roughly halves the spill. max_temp_directory_size makes DuckDB fail
+  # the month instead of filling the disk prod Postgres lives on; the month is
+  # then simply redone by the next `run`.
   duckdb -csv -noheader <<SQL > "$dir/counts.csv"
 SET memory_limit='1200MB'; SET threads=2; SET temp_directory='$dir/duck';
+SET max_temp_directory_size='$TEMP_MAX';
 SET TimeZone='UTC'; SET preserve_insertion_order=false;
-CREATE TABLE src AS
-  SELECT device_id, io_id, "timestamp" AS ts, io_value
+CREATE VIEW src AS
+  SELECT device_id, io_id, TRY_CAST("timestamp" AS TIMESTAMPTZ) AS ts, io_value
   FROM read_csv([$list], header=true, auto_detect=false, columns={
-    'id':'VARCHAR','gps_record_id':'VARCHAR','device_id':'VARCHAR','timestamp':'VARCHAR',
+    'id':'VARCHAR','gps_record_id':'VARCHAR','device_id':'UUID','timestamp':'VARCHAR',
     'io_id':'INTEGER','io_name':'VARCHAR','io_value':'VARCHAR','io_value_text':'VARCHAR',
     'unit':'VARCHAR','io_type':'VARCHAR'});
 CREATE TABLE keep AS
   SELECT DISTINCT device_id, io_id, ts, io_value FROM src
-  WHERE TRY_CAST(ts AS TIMESTAMPTZ) >= '2024-01-01'
-    AND TRY_CAST(ts AS TIMESTAMPTZ) <  '$CUTOFF'
-    AND strftime(TRY_CAST(ts AS TIMESTAMPTZ), '%Y-%m') = '$m';
+  WHERE ts >= '2024-01-01' AND ts < '$CUTOFF' AND strftime(ts, '%Y-%m') = '$m';
 COPY (SELECT device_id, io_id, ts, io_value FROM keep)
   TO '$dir/out' (FORMAT CSV, HEADER false, PARTITION_BY (device_id, io_id), COMPRESSION gzip);
 SELECT (SELECT count(*) FROM src), (SELECT count(*) FROM keep), (SELECT count(DISTINCT device_id) FROM keep);
