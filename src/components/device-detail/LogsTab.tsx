@@ -907,7 +907,7 @@ export function LogsTab({ device }: LogsTabProps) {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
-  const [queryInfo, setQueryInfo] = useState<{ count: number; time: number } | null>(null);
+  const [queryInfo, setQueryInfo] = useState<{ count: number; time: number; fromArchive?: boolean } | null>(null);
   // Snapshot of the query behind the current results, so Export matches what
   // is on screen even if the user edits the filters afterwards.
   const [fetched, setFetched] = useState<{ query: string; filename: string } | null>(null);
@@ -981,7 +981,7 @@ export function LogsTab({ device }: LogsTabProps) {
 
       if (data.success) {
         setRecords(data.data);
-        setQueryInfo({ count: data.count, time: elapsed });
+        setQueryInfo({ count: data.count, time: elapsed, fromArchive: data.sources?.includes("history") });
         const who = (device.device_name || device.imei).replace(/[^\w.-]+/g, "_");
         const stamp = (d: string, t: string) => `${d}_${t.replace(":", "")}`;
         setFetched({
@@ -989,7 +989,8 @@ export function LogsTab({ device }: LogsTabProps) {
           filename: `${who}_logs_${stamp(fromDate, fromTime)}_to_${stamp(toDate, toTime)}.csv`,
         });
       } else {
-        setError(data.error || "Failed to fetch logs");
+        // "history not yet available for 2025-06" says more than the generic error.
+        setError(data.message?.startsWith("history") ? data.message : data.error || "Failed to fetch logs");
       }
     } catch (err: any) {
       setError("Network error. Please try again.");
@@ -1468,7 +1469,7 @@ export function LogsTab({ device }: LogsTabProps) {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ fontSize: 11, color: THEME.text.tertiary, fontFamily: "JetBrains Mono, monospace" }}>
-                {queryInfo.time}ms
+                {queryInfo.fromArchive && "from archive · "}{queryInfo.time}ms
               </div>
               <button
                 onClick={handleExport}

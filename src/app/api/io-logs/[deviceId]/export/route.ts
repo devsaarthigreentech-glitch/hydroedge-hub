@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { archiveQuery, planLogSources } from '@/lib/archive-db';
+import { historyQuery, planLogSources } from '@/lib/history-store';
 import { parseLogQuery, buildLogSql, type LogQuery } from '@/lib/io-logs-query';
 import { paramLabel, formatIOValue } from '@/lib/io-params';
 import { csvRow, CSV_BOM, formatISTForCSV } from '@/lib/csv';
@@ -28,15 +28,17 @@ interface Row { io_id: number; io_value: string; timestamp: Date | string }
 async function fetchSlice(deviceId: string, q: LogQuery, from: Date, to: Date): Promise<Row[]> {
   const { sql, params } = buildLogSql(deviceId, q, from, to);
   const ordered = sql + ' ORDER BY timestamp ASC';
-  const sources = planLogSources(deviceId, from, to);
+  const sources = planLogSources(from, to);
 
   const runs: Promise<{ rows: Row[] }>[] = [];
   if (sources.primary) runs.push(query(ordered, params));
-  if (sources.archive) {
+  if (sources.history) {
     runs.push(
-      archiveQuery(ordered, params).catch((err: any) => {
-        throw new Error(`archive database unreachable: ${err.message}`);
-      }) as Promise<{ rows: Row[] }>
+      historyQuery(deviceId, q, from, to, 'asc')
+        .then((rows) => ({ rows }))
+        .catch((err: any) => {
+          throw new Error(`history store unreachable: ${err.message}`);
+        })
     );
   }
   const results = await Promise.all(runs);

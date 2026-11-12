@@ -95,7 +95,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { archiveQuery, planLogSources } from '@/lib/archive-db';
+import { historyQuery, planLogSources } from '@/lib/history-store';
 import { parseLogQuery, buildLogSql } from '@/lib/io-logs-query';
 
 // Kept as a constant because the merge below re-applies it: two sources each
@@ -119,24 +119,23 @@ export async function GET(
     const sql = built.sql + ` ORDER BY timestamp DESC LIMIT ${ROW_LIMIT}`;
     const sqlParams = built.params;
 
-    // ── Which database holds this window? ─────────────────────────────────
-    // Early raw history for a few devices lives on the archive box and was never
-    // imported here (see src/lib/archive-db.ts). For everything else, and for
-    // every device not explicitly listed, this resolves to production alone and
-    // behaves exactly as it did before.
-    const sources = planLogSources(deviceId, start, end);
+    // ── Which store holds this window? ────────────────────────────────────
+    // Prod io_records starts at the offload cutover; anything older is read from
+    // the Spaces history store (see src/lib/history-store.ts).
+    const sources = planLogSources(start, end);
 
     const runs: Promise<{ rows: any[] }>[] = [];
     if (sources.primary) runs.push(query(sql, sqlParams));
-    if (sources.archive) {
+    if (sources.history) {
       runs.push(
         // Fail loudly rather than returning the production half on its own. A
         // silently truncated log looks like "no data in that period", which is
-        // indistinguishable from a real gap — and there IS a real gap around the
-        // cutover, so the two must not be allowed to blur.
-        archiveQuery(sql, sqlParams).catch((err: any) => {
-          throw new Error(`archive database unreachable: ${err.message}`);
-        })
+        // indistinguishable from a real gap.
+        historyQuery(deviceId, q, start, end, 'desc', ROW_LIMIT)
+          .then((rows) => ({ rows }))
+          .catch((err: any) => {
+            throw new Error(`history store unreachable: ${err.message}`);
+          })
       );
     }
 
@@ -162,7 +161,7 @@ export async function GET(
       // Lets us tell the two paths apart in production without adding logging.
       sources: [
         ...(sources.primary ? ['primary'] : []),
-        ...(sources.archive ? ['archive'] : []),
+        ...(sources.history ? ['history'] : []),
       ],
     });
 

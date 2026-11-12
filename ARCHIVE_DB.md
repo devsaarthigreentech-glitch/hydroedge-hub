@@ -148,7 +148,30 @@ Known-good values to verify against (0015, 2026-08-22): `distance_km 185.96`,
   into prod as computed summary rows only, with the merge rule "fill only rows
   where prod is all zeros". **Whether the user ran it is unconfirmed**, see §6.
 
-### Logs & Messages read from the archive (commit `5450a7a`)
+### Logs & Messages now read history from Spaces (Nov 2026)
+
+**Replaces the archive route below**, which died with the Hostinger box.
+`src/lib/archive-db.ts` is deleted; the `ARCHIVE_*` settings do nothing now.
+
+- `scripts/split-history.sh` (run once on prod, in tmux) reads each monthly file
+  of both export folders (`io_records_prod/`, `archive_io_records/`) once and
+  writes `history/<device_id>/<io_id>/<YYYY-MM>.csv.gz` (`timestamp,io_value`, no
+  header, exact duplicates dropped, only rows before 2026-09-07 00:00 UTC) plus
+  `history/_months.txt` and `history/_manifest.csv`. Each month is checked
+  (staged rows = kept rows, `rclone check`) before it is marked done.
+- `src/lib/history-store.ts`: SigV4 GETs to Spaces, no extra dependency. Windows
+  before `HISTORY_CUTOVER_UTC` (default 2026-09-07T00:00:00Z) are read from it,
+  windows after from prod, straddling windows from both. Applies to **every**
+  device, and to the CSV export. `sources` now reads `primary` / `history`.
+- A month not yet in `_months.txt` → 500 with "history not yet available for
+  YYYY-MM", never an empty table. A missing file in a finished month = the device
+  sent nothing for that IO that month.
+- Config: `HISTORY_S3_KEY` / `HISTORY_S3_SECRET` (read-only key for
+  `sgt-hydroedge-archive`) in prod `.env.local`. Unset → prod only, as before.
+- When retention offloads more of prod later, export those months and re-run the
+  split for them, then raise `HISTORY_CUTOVER_UTC`.
+
+### Logs & Messages read from the archive (commit `5450a7a`, superseded)
 
 - `src/lib/archive-db.ts`: a lazy second pool (`max: 4`, 8 s connect, TLS) plus
   `planLogSources()`.
