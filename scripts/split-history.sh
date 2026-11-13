@@ -73,10 +73,26 @@ cmd_preflight() {
   log "preflight OK: tools present, bucket readable and writable, $(df -h /var/tmp | awk 'NR==2{print $4}') free in /var/tmp"
 }
 
+# Every month from the earliest exported one to the cutover month, including
+# months with no file in either folder (no device reported): those are marked
+# done with zero rows, so the app reads them as empty rather than "not split".
 all_months() {
-  for s in "${SOURCES[@]}"; do rclone lsf "$(remote "$s/")"; done \
-    | grep -E '^[0-9]{4}-[0-9]{2}\.csv\.gz$' | sed 's/\.csv\.gz$//' | sort -u \
-    | awk -v cut="${CUTOFF:0:7}" '$0 <= cut'
+  local first
+  first=$(for s in "${SOURCES[@]}"; do rclone lsf "$(remote "$s/")"; done \
+    | grep -E '^[0-9]{4}-[0-9]{2}\.csv\.gz$' | sort | head -1 | cut -c1-7)
+  [[ -n $first ]] || return 0
+  local m=$first
+  while [[ $m < "${CUTOFF:0:7}" || $m == "${CUTOFF:0:7}" ]]; do
+    echo "$m"
+    m=$(date -u -d "$m-01 +1 month" +%Y-%m)
+  done
+}
+
+mark_done() {   # month rows_read rows_kept devices
+  local done_list; done_list=$( { done_months; echo "$1"; } | sort -u )
+  printf '%s\n' "$done_list" | rclone rcat "$(remote history/_months.txt)"
+  { rclone cat "$(remote history/_manifest.csv)" 2>/dev/null || echo "month,rows_read,rows_kept,devices,split_at_utc"; \
+    echo "$1,$2,$3,$4,$(date -u +%FT%TZ)"; } | rclone rcat "$(remote history/_manifest.csv)"
 }
 
 split_month() {
@@ -88,7 +104,11 @@ split_month() {
       files+=("'$dir/src/$s.csv.gz'")
     fi
   done
-  (( ${#files[@]} )) || { log "$m: no source files"; return 0; }
+  if (( ${#files[@]} == 0 )); then
+    mark_done "$m" 0 0 0; rm -rf "$dir"
+    log "$m: no source files (no device reported) — marked done, empty"
+    return 0
+  fi
   local list; list=$(IFS=,; echo "${files[*]}")
 
   # Load, dedupe, write partitions. Counts land in $dir/counts.csv.
@@ -144,10 +164,7 @@ SQL
   rclone check "$dir/stage/" "$(remote history/)" --one-way --checkers 16 \
     || die "$m: upload check failed"
 
-  local done_list; done_list=$( { done_months; echo "$m"; } | sort -u )
-  printf '%s\n' "$done_list" | rclone rcat "$(remote history/_months.txt)"
-  { rclone cat "$(remote history/_manifest.csv)" 2>/dev/null || echo "month,rows_read,rows_kept,devices,split_at_utc"; \
-    echo "$m,$read,$kept,$devices,$(date -u +%FT%TZ)"; } | rclone rcat "$(remote history/_manifest.csv)"
+  mark_done "$m" "$read" "$kept" "$devices"
   rm -rf "$dir"
   log "$m: read $read, kept $kept (deduped, before cutoff), $devices devices — uploaded"
 }
