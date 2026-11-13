@@ -118,19 +118,26 @@ SQL
   IFS=, read -r read kept devices < <(tail -1 "$dir/counts.csv")
 
   # device_id=<uuid>/io_id=<n>/data_*.csv.gz  →  <uuid>/<n>/<m>.csv.gz
-  # Several data_* files in one partition are concatenated: gzip members join
-  # cleanly, and there is no header to repeat.
-  local p dev io
+  # A partition with several data_* files is re-compressed as ONE gzip member:
+  # some readers (DuckDB's own, for one) stop after the first member of a
+  # concatenated gzip, which once made June 2026 look 11 k rows short.
+  local p dev io parts
   for p in "$dir"/out/device_id=*/io_id=*; do
     dev=${p#*device_id=}; dev=${dev%%/*}; io=${p##*io_id=}
     mkdir -p "$dir/stage/$dev/$io"
-    cat "$p"/*.csv.gz > "$dir/stage/$dev/$io/$m.csv.gz"
+    parts=("$p"/*.csv.gz)
+    if (( ${#parts[@]} == 1 )); then
+      mv "${parts[0]}" "$dir/stage/$dev/$io/$m.csv.gz"
+    else
+      zcat "${parts[@]}" | gzip -6 > "$dir/stage/$dev/$io/$m.csv.gz"
+    fi
   done
   rm -rf "$dir/out"
 
   # Prove the staged files hold exactly the kept rows before anything is uploaded.
+  # Counted with zcat, independently of the tool that wrote them.
   local staged
-  staged=$(duckdb -csv -noheader -c "SELECT count(*) FROM read_csv('$dir/stage/*/*/$m.csv.gz', header=false, columns={'ts':'VARCHAR','v':'VARCHAR'})")
+  staged=$(find "$dir/stage" -name "$m.csv.gz" -print0 | xargs -0 zcat | wc -l)
   [[ $staged == "$kept" ]] || die "$m: staged rows $staged != kept rows $kept"
 
   rclone copy "$dir/stage/" "$(remote history/)" --transfers 16 --checkers 16
