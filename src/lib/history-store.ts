@@ -202,8 +202,13 @@ export async function historyQuery(
         chunk.push({ io_id: io, io_value: r.v, timestamp: new Date(r.ts) });
       }
     }
-    out.push(...chunk.sort(cmp));
-    if (capped && out.length >= limit!) return out.slice(0, limit);
+    // A loop, not push(...chunk): a week of one busy device is >100k rows,
+    // which overflows the call stack as spread arguments.
+    chunk.sort(cmp);
+    for (const r of chunk) {
+      out.push(r);
+      if (capped && out.length >= limit!) return out;
+    }
   }
   return out;
 }

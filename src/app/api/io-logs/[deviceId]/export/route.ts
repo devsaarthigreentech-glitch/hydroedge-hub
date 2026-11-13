@@ -74,39 +74,45 @@ export async function GET(
           ));
           return;
         }
-        if (cursor > endMs) {
-          controller.close();
-          return;
-        }
-
-        // Slices are inclusive at both ends, so step 1 ms past each one.
-        const from = new Date(cursor);
-        const to = new Date(Math.min(cursor + CHUNK_MS - 1, endMs));
-        cursor = to.getTime() + 1;
-
-        const rows = await fetchSlice(deviceId, q, from, to);
-
-        // Rows are ASC, so a timestamp's values are contiguous. A record never
-        // spans two slices because all its IOs share one timestamp.
+        // Keep reading slices until one has rows or the window ends. A pull that
+        // returns without enqueueing is never called again, so an empty slice
+        // (a unit off overnight, or before it was installed) used to stall the
+        // download forever.
         let out = '';
-        let curTs: number | null = null;
-        let vals = new Map<number, string>();
-        const flush = () => {
-          if (curTs === null) return;
-          out += csvRow([formatISTForCSV(new Date(curTs)), ...q.ioIds.map((id) => vals.get(id) ?? '')]);
-        };
-        for (const r of rows) {
-          const ts = new Date(r.timestamp).getTime();
-          if (ts !== curTs) {
-            flush();
-            curTs = ts;
-            vals = new Map();
+        while (!out) {
+          if (cursor > endMs) {
+            controller.close();
+            return;
           }
-          vals.set(r.io_id, formatIOValue(r.io_id, String(r.io_value)));
-        }
-        flush();
 
-        if (out) controller.enqueue(encoder.encode(out));
+          // Slices are inclusive at both ends, so step 1 ms past each one.
+          const from = new Date(cursor);
+          const to = new Date(Math.min(cursor + CHUNK_MS - 1, endMs));
+          cursor = to.getTime() + 1;
+
+          const rows = await fetchSlice(deviceId, q, from, to);
+
+          // Rows are ASC, so a timestamp's values are contiguous. A record never
+          // spans two slices because all its IOs share one timestamp.
+          let curTs: number | null = null;
+          let vals = new Map<number, string>();
+          const flush = () => {
+            if (curTs === null) return;
+            out += csvRow([formatISTForCSV(new Date(curTs)), ...q.ioIds.map((id) => vals.get(id) ?? '')]);
+          };
+          for (const r of rows) {
+            const ts = new Date(r.timestamp).getTime();
+            if (ts !== curTs) {
+              flush();
+              curTs = ts;
+              vals = new Map();
+            }
+            vals.set(r.io_id, formatIOValue(r.io_id, String(r.io_value)));
+          }
+          flush();
+        }
+
+        controller.enqueue(encoder.encode(out));
       } catch (err: any) {
         console.error('IO Logs export error:', err);
         controller.error(err);
