@@ -29,7 +29,7 @@ interface Param {
 type Generation = "NanoV3" | "Gen2";
 type GenView = Generation | "All";
 interface Category { name: string; params: Param[]; editable: number; }
-interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; reply_text: string | null; sent_at: string; }
+interface CmdLog { id: string; verb: string; pid: string | null; value_text: string | null; status: string; result_reason: string | null; reply_text: string | null; sent_at: string; attempts?: number; last_sent_at?: string | null; }
 
 // ── 28 registry categories → 8 navigable meta-sections ──────────────────────
 const SECTIONS: Array<{ name: string; icon: string; cats: string[] }> = [
@@ -443,6 +443,12 @@ export function NanoConfigTab({ device }: { device: Device }) {
                   <code style={{ fontSize: 10, color: "#c4b5fd", fontWeight: 600 }}>{e.verb} {e.pid || ""} {e.value_text || ""}</code>
                   <span style={{ fontSize: 8, color: C.faint, marginLeft: "auto" }}>{e.sent_at ? new Date(e.sent_at).toLocaleTimeString() : ""}</span>
                 </div>
+                {/* Not answered yet: a set / stop / start is kept and sent again when the device is back online */}
+                {e.status === "sent" && ["set", "stop", "start"].includes(e.verb) && Date.now() - new Date(e.sent_at).getTime() > 60000 && (
+                  <div style={{ marginTop: 3, fontSize: 9, color: C.amber }}>
+                    Waiting for the device: it has not answered. Sent {e.attempts || 1} time{(e.attempts || 1) === 1 ? "" : "s"}; it is sent again when the device comes back online, for up to 7 days.
+                  </div>
+                )}
                 {/* What a get returned (val of the device's t:cfg reply; up to 95 chars, e.g. a SHA-256) */}
                 {e.verb === "get" && e.reply_text != null && <div style={{ marginTop: 3, fontSize: 9, color: C.green, fontFamily: "monospace", wordBreak: "break-all" }}>= {e.reply_text}</div>}
                 {/* rs485 scan/read result text (up to ~400 chars), wrapped in full */}

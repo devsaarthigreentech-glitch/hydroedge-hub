@@ -217,6 +217,12 @@ export function analyseNanoHealth(input: {
       detail: 'HHO production was stopped because the main tank read dry for longer than P-5041.',
       action: 'Refill the main water tank. If it keeps happening, check for leaks and the main level sensor (P-4096).',
     }));
+    F.push(finding('moved_engine_off', episodes(boots, on('P-4161'), 0), {
+      title: 'Vehicle moved with the engine off',
+      category: 'operation', severity: 'critical',
+      detail: 'The unit found itself more than P-5809 metres from where the engine was switched off, or moving for a minute with the engine signal off. The vehicle was towed or carried, or the engine-run signal is not reaching the unit.',
+      action: 'Check where the vehicle is on the map. If it was being driven normally, the engine-run wire or P-5020 engine detection is at fault, and distance is not being counted.',
+    }));
     F.push(finding('main_tank_empty', episodes(boots, off('P-4096'), L.tankEmptyMinS), {
       title: 'Main water tank empty',
       category: 'service', severity: 'warning',

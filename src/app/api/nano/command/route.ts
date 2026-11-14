@@ -32,6 +32,11 @@
 // (pending, then sent once published), publishes the /cmd frame. The
 // config-mirror writeback (caught by nano_ingest.py) flips the row to ok/nack.
 //
+// A set / stop / start the device never answers (it was unpowered or out of
+// coverage) stays 'sent' and lib/nano-cmd-retry publishes it again each time
+// the device is heard from, for up to 7 days; attempts and last_sent_at show
+// that in the log (migration 035).
+//
 // WO (write-only) parameters such as P-514 Wi-Fi passphrase are sent to the
 // device in full but logged as '***': the command log is visible to every
 // operator and must never become the place a secret can be read back from.
@@ -61,7 +66,8 @@ export async function GET(request: NextRequest) {
   if (!deviceId) return NextResponse.json({ success: false, error: 'device_id required' }, { status: 400 });
   try {
     const res = await query(
-      `SELECT id, verb, pid, value_text, status, result_reason, reply_text, sent_at, resolved_at
+      `SELECT id, verb, pid, value_text, status, result_reason, reply_text, sent_at, resolved_at,
+              attempts, last_sent_at
          FROM nano_commands WHERE device_id = $1 ORDER BY sent_at DESC LIMIT $2`,
       [deviceId, limit]
     );
