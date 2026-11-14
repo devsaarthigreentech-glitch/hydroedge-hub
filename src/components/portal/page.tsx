@@ -121,26 +121,37 @@ useEffect(() => {
   }, [customerFilter]);
 
   // Fetch real-time telemetry from database
+  const selectedDeviceId = selectedDevice?.id;
   useEffect(() => {
-    if (selectedDevice) {
-      async function fetchTelemetry() {
-        try {
-          const response = await fetch(`/api/telemetry/${selectedDevice?.id}`);
-          const data = await response.json();
-          if (data.success) {
-            setTelemetryData(data.data);
-            setLastUpdate(data.lastUpdate);
-          }
-        } catch (err) {
-          console.error('Error fetching telemetry:', err);
-        }
-      }
+    // Never show the previous device's readings under this device's header:
+    // clear on switch, and drop responses that arrive after the user moved on
+    // (a slow or failed fetch used to leave the last device's GPS on screen).
+    setTelemetryData([]);
+    setLastUpdate(undefined);
+    if (!selectedDeviceId) return;
 
-      fetchTelemetry();
-      const interval = setInterval(fetchTelemetry, 30000);
-      return () => clearInterval(interval);
+    let cancelled = false;
+    async function fetchTelemetry() {
+      try {
+        const response = await fetch(`/api/telemetry/${selectedDeviceId}`);
+        const data = await response.json();
+        if (cancelled) return;
+        if (data.success) {
+          setTelemetryData(data.data);
+          setLastUpdate(data.lastUpdate);
+        }
+      } catch (err) {
+        console.error('Error fetching telemetry:', err);
+      }
     }
-  }, [selectedDevice]);
+
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selectedDeviceId]);
 
   const deviceCount = filterDevices(devices,"","all");
 

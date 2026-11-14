@@ -3,6 +3,13 @@
 -- ----------------------------------------------------------------------------
 -- ONE index, on io_records. Revised after inspecting the live schema.
 --
+-- 2026-11-03: found MISSING on prod (io_records now 12 GB / 77 M rows after the
+-- offload swap; indexes are io_records_new_*). Without it the Telemetry tab's
+-- "latest value per io_id" lookup took 52 s for SGT-GX-0726-0028 and the API
+-- hit its statement timeout. Rebuilt on prod 2026-11-14 (3.9 GB, ~6 min);
+-- the same request now takes 0.07 s. Re-run this file if the check below
+-- returns 0 rows.
+--
 -- What already exists (do NOT duplicate these):
 --   gps_records  idx_gps_device_timestamp  (device_id, timestamp DESC)
 --   io_records   idx_io_device_timestamp   (device_id, timestamp DESC)
