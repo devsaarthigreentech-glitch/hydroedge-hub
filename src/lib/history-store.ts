@@ -28,7 +28,7 @@
 
 import crypto from 'crypto';
 import zlib from 'zlib';
-import type { LogQuery } from './io-logs-query';
+import { testCondition, type LogQuery } from './io-logs-query';
 
 const BUCKET = process.env.HISTORY_S3_BUCKET || 'sgt-hydroedge-archive';
 const REGION = process.env.HISTORY_S3_REGION || 'sgp1';
@@ -152,6 +152,33 @@ function monthsBetween(from: Date, to: Date): string[] {
 // ── Query ───────────────────────────────────────────────────────────────────
 
 /**
+ * Timestamps in `[from, to]` whose record satisfies q.conditions — the same
+ * set buildLogSql's subquery produces. All IOs of a record share a timestamp.
+ */
+async function matchingTimestamps(
+  deviceId: string, q: LogQuery, months: string[], from: number, to: number
+): Promise<Set<number>> {
+  const sets = await Promise.all(q.conditions.map(async (c) => {
+    const files = await Promise.all(months.map((m) => monthFile(deviceId, c.ioId, m)));
+    const hit = new Set<number>();
+    for (const rows of files) {
+      for (let i = lowerBound(rows, from); i < rows.length && rows[i].ts <= to; i++) {
+        const n = parseFloat(rows[i].v);
+        if (!isNaN(n) && testCondition(c, n)) hit.add(rows[i].ts);
+      }
+    }
+    return hit;
+  }));
+  if (q.match === 'any') {
+    const all = new Set<number>();
+    for (const s of sets) for (const t of s) all.add(t);
+    return all;
+  }
+  const [first, ...rest] = sets;
+  return new Set([...first].filter((t) => rest.every((s) => s.has(t))));
+}
+
+/**
  * Rows for `[start, end]` (inclusive, clipped to before the cutover) with the
  * same filters buildLogSql applies, sorted by timestamp in `order`.
  *
@@ -189,10 +216,14 @@ export async function historyQuery(
     const files = await Promise.all(
       q.ioIds.flatMap((io) => batch.map((mm) => monthFile(deviceId, io, mm).then((rows) => ({ io, rows }))))
     );
+    const allowed = q.conditions.length
+      ? await matchingTimestamps(deviceId, q, batch, from, to)
+      : null;
     const chunk: HistoryRow[] = [];
     for (const { io, rows } of files) {
       for (let i = lowerBound(rows, from); i < rows.length && rows[i].ts <= to; i++) {
         const r = rows[i];
+        if (allowed && !allowed.has(r.ts)) continue;
         if (q.min !== null || q.max !== null) {
           const n = parseFloat(r.v);
           if (isNaN(n)) continue;

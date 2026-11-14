@@ -10,6 +10,8 @@ export interface IOParam {
   name: string;
   unit: string;
   multiplier?: number;
+  /** Reports only 0 or 1; the logs tab offers ON/OFF instead of a number box. */
+  onOff?: boolean;
 }
 
 export const COMMON_PARAMS: IOParam[] = [
@@ -20,12 +22,12 @@ export const COMMON_PARAMS: IOParam[] = [
   { io_id: 10, name: "ain.2", unit: "V", multiplier: 0.001 },
   { io_id: 11, name: "ain.3", unit: "V", multiplier: 0.001 },
   { io_id: 245, name: "ain.4", unit: "V", multiplier: 0.001 },
-  { io_id: 179, name: "dout.1", unit: "" },
-  { io_id: 180, name: "dout.2", unit: "" },
-  { io_id: 1, name: "din.1", unit: "" },
-  { io_id: 2, name: "din.2", unit: "" },
-  { io_id: 3, name: "din.3", unit: "" },
-  { io_id: 4, name: "din.4", unit: "" },
+  { io_id: 179, name: "dout.1", unit: "", onOff: true },
+  { io_id: 180, name: "dout.2", unit: "", onOff: true },
+  { io_id: 1, name: "din.1", unit: "", onOff: true },
+  { io_id: 2, name: "din.2", unit: "", onOff: true },
+  { io_id: 3, name: "din.3", unit: "", onOff: true },
+  { io_id: 4, name: "din.4", unit: "", onOff: true },
   { io_id: 67, name: "battery.voltage", unit: "V", multiplier: 0.001 },
   { io_id: 66, name: "external.voltage", unit: "V", multiplier: 0.001 },
   { io_id: 68, name: "battery.current", unit: "mA" },
@@ -35,14 +37,24 @@ export const COMMON_PARAMS: IOParam[] = [
   { io_id: 35, name: "can.engine.rpm", unit: "rpm" },
   { io_id: 36, name: "can.tracker.counted.mileage", unit: "m" },
   { io_id: 24, name: "vehicle.speed", unit: "km/h" },
-  { io_id: 239, name: "ignition.status", unit: "" },
-  { io_id: 240, name: "movement.status", unit: "" },
+  { io_id: 239, name: "ignition.status", unit: "", onOff: true },
+  { io_id: 240, name: "movement.status", unit: "", onOff: true },
   { io_id: 199, name: "trip.odometer", unit: "m" },
   { io_id: 21, name: "gsm.signal.level", unit: "%" },
 ];
 
 // Widest window the logs tab may query or export.
 export const MAX_RANGE_DAYS = 31;
+
+// Most conditions one logs query may combine.
+export const MAX_CONDITIONS = 5;
+
+/** Display value → raw DB value (the inverse of formatIOValue's scaling). */
+export function toRawValue(ioId: number, display: number): number {
+  const m = getParam(ioId)?.multiplier;
+  // toFixed trims float noise: 0.57 / 0.001 is 569.9999999999999, not 570.
+  return m ? parseFloat((display / m).toFixed(6)) : display;
+}
 
 export function getParam(ioId: number): IOParam | undefined {
   return COMMON_PARAMS.find((p) => p.io_id === ioId);

@@ -832,6 +832,8 @@ import { Device } from "@/types";
 import { THEME } from "@/lib/theme";
 import { downloadBlob } from "@/lib/csv";
 import { COMMON_PARAMS, MAX_RANGE_DAYS, getParam, formatIOValue } from "@/lib/io-params";
+import type { MatchMode } from "@/lib/io-logs-query";
+import { ConditionBuilder, conditionsToQuery, type ConditionDraft } from "./ConditionBuilder";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -900,8 +902,8 @@ export function LogsTab({ device }: LogsTabProps) {
   const [showParamDropdown, setShowParamDropdown] = useState(false);
   const [paramSearch, setParamSearch] = useState("");
 
-  const [minFilter, setMinFilter] = useState("");
-  const [maxFilter, setMaxFilter] = useState("");
+  const [conditions, setConditions] = useState<ConditionDraft[]>([]);
+  const [matchMode, setMatchMode] = useState<MatchMode>("all");
 
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -910,7 +912,10 @@ export function LogsTab({ device }: LogsTabProps) {
   const [queryInfo, setQueryInfo] = useState<{ count: number; time: number; fromArchive?: boolean } | null>(null);
   // Snapshot of the query behind the current results, so Export matches what
   // is on screen even if the user edits the filters afterwards.
-  const [fetched, setFetched] = useState<{ query: string; filename: string } | null>(null);
+  const [fetched, setFetched] = useState<{ query: string; filename: string; ioCount: number; filtered: boolean } | null>(null);
+
+  // A condition's parameter is always shown, so conditions alone are enough.
+  const canFetch = selectedIOIds.length > 0 || conditions.length > 0;
 
   const toggleIOId = (ioId: number) => {
     setSelectedIOIds((prev) => {
@@ -925,8 +930,19 @@ export function LogsTab({ device }: LogsTabProps) {
   };
 
   const handleFetch = useCallback(async () => {
-    if (selectedIOIds.length === 0) {
+    const cond = conditionsToQuery(conditions);
+    if ("error" in cond) {
+      setError(cond.error);
+      return;
+    }
+    // Show the parameters the conditions test alongside the selected ones.
+    const ioIds = [...selectedIOIds, ...cond.ioIds.filter((id) => !selectedIOIds.includes(id))];
+    if (ioIds.length === 0) {
       setError("Select at least one IO parameter");
+      return;
+    }
+    if (ioIds.length > 10) {
+      setError("Selected and condition parameters together can be at most 10");
       return;
     }
 
@@ -955,24 +971,14 @@ export function LogsTab({ device }: LogsTabProps) {
 
     try {
       const params = new URLSearchParams({
-        io_ids: selectedIOIds.join(","),
+        io_ids: ioIds.join(","),
         start: new Date(startMs).toISOString(),
         end: new Date(endMs).toISOString(),
       });
-      if (minFilter.trim() || maxFilter.trim()) {
-        // If only one IO param selected and it has a multiplier, convert back to raw
-        const multiplier = selectedIOIds.length === 1
-          ? (getParam(selectedIOIds[0])?.multiplier || 1)
-          : 1;
-
-        if (minFilter.trim()) {
-          const rawMin = parseFloat(minFilter) / multiplier;
-          params.set('min', rawMin.toString());
-        }
-        if (maxFilter.trim()) {
-          const rawMax = parseFloat(maxFilter) / multiplier;
-          params.set('max', rawMax.toString());
-        }
+      if (cond.where) {
+        // Values go up in display units; the server scales each to raw.
+        params.set("where", cond.where);
+        params.set("match", matchMode);
       }
 
       const res = await fetch(`/api/io-logs/${device.id}?${params}`);
@@ -987,6 +993,8 @@ export function LogsTab({ device }: LogsTabProps) {
         setFetched({
           query: params.toString(),
           filename: `${who}_logs_${stamp(fromDate, fromTime)}_to_${stamp(toDate, toTime)}.csv`,
+          ioCount: ioIds.length,
+          filtered: !!cond.where,
         });
       } else {
         // "history not yet available for 2025-06" says more than the generic error.
@@ -997,7 +1005,7 @@ export function LogsTab({ device }: LogsTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [device.id, device.device_name, device.imei, fromDate, fromTime, toDate, toTime, selectedIOIds, minFilter, maxFilter]);
+  }, [device.id, device.device_name, device.imei, fromDate, fromTime, toDate, toTime, selectedIOIds, conditions, matchMode]);
 
   // The table is capped at 1,000 rows; the export endpoint streams every row in
   // the window. A failed or cut-off stream rejects res.blob(), so a partial file
@@ -1191,44 +1199,18 @@ export function LogsTab({ device }: LogsTabProps) {
           </div>
         </div>
 
-        {/* Row 2: Value Filters */}
-        <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 180px", minWidth: 140 }}>
-            <label style={labelStyle}>
-              Min Value
-              <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
-            </label>
-            <input
-              type="number"
-              value={minFilter}
-              onChange={(e) => setMinFilter(e.target.value)}
-              placeholder="e.g. 5"
-              style={inputStyle}
-            />
-          </div>
-          <div style={{ flex: "1 1 180px", minWidth: 140 }}>
-            <label style={labelStyle}>
-              Max Value
-              <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
-            </label>
-            <input
-              type="number"
-              value={maxFilter}
-              onChange={(e) => setMaxFilter(e.target.value)}
-              placeholder="e.g. 65"
-              style={inputStyle}
-            />
-          </div>
-          <div style={{ flex: "2 1 200px", minWidth: 160, display: "flex", alignItems: "flex-end" }}>
-            <div style={{ fontSize: 11, color: THEME.text.tertiary, padding: "10px 0", lineHeight: 1.5 }}>
-              {selectedIOIds.length === 1 && getParam(selectedIOIds[0])?.unit
-                ? <>Enter values in <strong style={{ color: THEME.text.secondary }}>{getParam(selectedIOIds[0])?.unit}</strong> — e.g. &quot;{getParam(selectedIOIds[0])?.name} &gt; 5 {getParam(selectedIOIds[0])?.unit}&quot;</>
-                : selectedIOIds.length > 1
-                ? <>With multiple parameters, filters apply without unit conversion</>
-                : <>Select a parameter first, then set filter values</>
-              }
-            </div>
-          </div>
+        {/* Row 2: Conditions */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={labelStyle}>
+            Conditions
+            <span style={{ fontSize: 10, fontWeight: 400, color: THEME.text.tertiary, marginLeft: 4 }}>(optional)</span>
+          </label>
+          <ConditionBuilder
+            conditions={conditions}
+            match={matchMode}
+            onChange={setConditions}
+            onMatchChange={setMatchMode}
+          />
         </div>
 
         {/* Row 3: IO Parameter Selector */}
@@ -1410,24 +1392,24 @@ export function LogsTab({ device }: LogsTabProps) {
         {/* Fetch Button */}
         <button
           onClick={handleFetch}
-          disabled={loading || selectedIOIds.length === 0}
+          disabled={loading || !canFetch}
           style={{
-            background: selectedIOIds.length > 0 ? THEME.primary[500] : THEME.neutral[200],
-            color: selectedIOIds.length > 0 ? "white" : THEME.text.tertiary,
+            background: canFetch ? THEME.primary[500] : THEME.neutral[200],
+            color: canFetch ? "white" : THEME.text.tertiary,
             border: "none", borderRadius: 10, padding: "12px 32px",
             fontWeight: 700, fontSize: 14,
-            cursor: selectedIOIds.length > 0 && !loading ? "pointer" : "not-allowed",
+            cursor: canFetch && !loading ? "pointer" : "not-allowed",
             fontFamily: "inherit", transition: "all 0.2s",
-            boxShadow: selectedIOIds.length > 0 ? THEME.shadow.md : "none",
+            boxShadow: canFetch ? THEME.shadow.md : "none",
           }}
           onMouseEnter={(e) => {
-            if (selectedIOIds.length > 0 && !loading) {
+            if (canFetch && !loading) {
               e.currentTarget.style.background = THEME.primary[600];
               e.currentTarget.style.transform = "translateY(-1px)";
             }
           }}
           onMouseLeave={(e) => {
-            if (selectedIOIds.length > 0) {
+            if (canFetch) {
               e.currentTarget.style.background = THEME.primary[500];
               e.currentTarget.style.transform = "translateY(0)";
             }
@@ -1493,7 +1475,9 @@ export function LogsTab({ device }: LogsTabProps) {
 
           {records.length === 0 ? (
             <div style={{ padding: 40, textAlign: "center", fontSize: 13, color: THEME.text.tertiary }}>
-              No records found for this time range
+              {fetched?.filtered
+                ? "No records match these conditions in this time range"
+                : "No records found for this time range"}
             </div>
           ) : (
             <div style={{ overflowX: "auto", maxHeight: 500 }}>
@@ -1508,7 +1492,7 @@ export function LogsTab({ device }: LogsTabProps) {
                     }}>
                       Timestamp (IST)
                     </th>
-                    {selectedIOIds.length > 1 && (
+                    {(fetched?.ioCount ?? 0) > 1 && (
                       <th style={{
                         textAlign: "left", padding: "12px 16px", fontSize: 11, fontWeight: 700,
                         color: THEME.text.tertiary, textTransform: "uppercase", letterSpacing: 1,
@@ -1544,7 +1528,7 @@ export function LogsTab({ device }: LogsTabProps) {
                         }}>
                           {formatIST(rec.timestamp)}
                         </td>
-                        {selectedIOIds.length > 1 && (
+                        {(fetched?.ioCount ?? 0) > 1 && (
                           <td style={{
                             padding: "10px 16px", fontFamily: "JetBrains Mono, monospace",
                             fontSize: 12, color: THEME.primary[600], fontWeight: 600,
