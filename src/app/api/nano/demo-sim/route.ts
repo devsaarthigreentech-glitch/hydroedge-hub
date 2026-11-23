@@ -20,7 +20,9 @@ const WORKER_FRESH_S = 20;
 
 const FIXED = [
   { id: 'normal', label: 'Normal running', detail: 'Producing, cell current within ±10% of the set point' },
+  { id: 'driving', label: 'Driving', detail: 'Producing while moving along a route on the map' },
   { id: 'alerts', label: 'Alert cycle', detail: 'Raises and clears catalog alerts in turn' },
+  { id: 'driving_alerts', label: 'Driving with alerts', detail: 'Moving on the map while catalog alerts come and go' },
   { id: 'engine_off', label: 'Engine off', detail: 'Engine stopped, plant not producing' },
   { id: 'offline', label: 'Signal lost', detail: 'No frames: the device goes offline' },
 ] as const;
@@ -47,10 +49,15 @@ async function catalogAlerts() {
          FROM nano_alert_catalog
         ORDER BY severity_rank DESC NULLS LAST, alert_id`
     );
-    return r.rows.map((a: any) => ({
+    // "Water quality / TDS alert (if sensor)" -> "Water quality / TDS alert"; the
+    // code is added only where two alerts would read the same.
+    const name = (a: any) => String(a.condition || '').replace(/\s*\(.*$/, '').trim() || a.alert_id;
+    const names: string[] = r.rows.map(name);
+    return r.rows.map((a: any, i: number) => ({
       id: `alert:${a.alert_id}`,
-      label: `${a.alert_id} · ${a.severity}`,
-      detail: `${a.condition || a.category || ''}${a.stops_engine ? ' (stops the plant)' : ''}`,
+      label: names.filter((x) => x === names[i]).length > 1 ? `${names[i]} (${a.alert_id})` : names[i],
+      severity: a.severity || 'Other',
+      detail: `${a.alert_id}: ${a.condition || a.category || ''}${a.stops_engine ? ' (stops the plant)' : ''}`,
     }));
   } catch {
     return [];

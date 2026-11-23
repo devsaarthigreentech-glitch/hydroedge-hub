@@ -25,6 +25,7 @@ Requires: psycopg2, paho-mqtt (the same packages as nano_ingest).
 """
 
 import argparse
+import bisect
 import json
 import logging
 import math
@@ -438,7 +439,91 @@ def replay(client, frames, args, alerts=()):
 # --control: follow the GreenVision switch (nano_demo_sim, migration 036)
 # --------------------------------------------------------------------------- #
 
-FIXED_SCENARIOS = ("normal", "alerts", "engine_off", "offline")
+DRIVING = ("driving", "driving_alerts")
+ROUTE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "nano_demo_route_hyderabad.json")
+ON_ROUTE_KM = 0.3        # a last position this close to the route is resumed from
+
+
+def haversine_km(a, b):
+    la1, lo1, la2, lo2 = (math.radians(x) for x in (a[0], a[1], b[0], b[1]))
+    h = (math.sin((la2 - la1) / 2) ** 2
+         + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2)
+    return 2 * 6371 * math.asin(math.sqrt(h))
+
+
+class Drive:
+    """The demo vehicle on a closed loop of [lat, lon] points (made up).
+
+    Until it has driven, position is None and frames keep the replayed unit's
+    own GPS. Afterwards it stays parked wherever it last stopped."""
+
+    def __init__(self, points, last=None):
+        self.points, self.cum = points, [0.0]
+        for a, b in zip(points, points[1:]):
+            self.cum.append(self.cum[-1] + haversine_km(a, b))
+        self.total = self.cum[-1]
+        self.km, self.speed, self.started, self.last_t = 0.0, 0.0, False, None
+        if last:
+            near = min(range(len(points)), key=lambda i: haversine_km(points[i], last))
+            if haversine_km(points[near], last) <= ON_ROUTE_KM:
+                self.km, self.started = self.cum[near] % self.total, True
+
+    def step(self, now, moving, n):
+        """Advance to now. Speeds up, drifts like traffic, and brakes to a stop."""
+        dt = min(max(now - self.last_t, 0.0), 10.0) if self.last_t is not None else 0.0
+        self.last_t = now
+        target = (46 + 12 * math.sin(2 * math.pi * n / 37)
+                  + 5 * math.sin(2 * math.pi * n / 11)) if moving else 0.0
+        was = self.speed
+        self.speed = min(target, was + 4 * dt) if target > was else max(target, was - 8 * dt)
+        self.km = (self.km + (was + self.speed) / 2 * dt / 3600) % self.total
+        self.started = self.started or moving
+
+    def halt(self):
+        """Signal lost, switched off, rebooting: it doesn't move while unseen."""
+        self.speed, self.last_t = 0.0, None
+
+    @property
+    def position(self):
+        if not self.started:
+            return None
+        i = min(bisect.bisect_right(self.cum, self.km) - 1, len(self.points) - 2)
+        span = self.cum[i + 1] - self.cum[i]
+        t = (self.km - self.cum[i]) / span if span else 0.0
+        a, b = self.points[i], self.points[i + 1]
+        return (round(a[0] + (b[0] - a[0]) * t, 6), round(a[1] + (b[1] - a[1]) * t, 6))
+
+    def apply(self, frame):
+        """Make the frame agree with the movement. A drive has its engine running."""
+        d = frame["d"]
+        if not self.started:
+            return
+        d["P-4115"] = round(self.speed, 1)
+        if self.speed > 0:
+            d["P-4113"] = True
+            d["P-4104"] = rpm = int(900 + self.speed * 20)
+            if "P-5250" in d:
+                d["P-5250"] = rpm_zone(rpm)
+            if str(d.get("P-5251", "")).startswith("RPM zone"):
+                d["P-5251"] = "RPM zone %d" % rpm_zone(rpm)
+
+
+def load_drive(conn, device_id):
+    """The drive, resumed from the unit's last position; None without a route file."""
+    try:
+        with open(ROUTE_FILE) as f:
+            points = json.load(f)
+    except (OSError, ValueError) as e:
+        log.warning("no driving scenarios: %s", e)
+        return None
+    with conn.cursor() as cur:
+        cur.execute("SELECT last_lat, last_lon FROM nano_device_state WHERE device_id = %s;",
+                    (device_id,))
+        row = cur.fetchone()
+    conn.commit()
+    last = (float(row[0]), float(row[1])) if row and None not in row else None
+    return Drive(points, last)
 
 
 def apply_engine_off(frame):
@@ -652,7 +737,7 @@ def read_switch(conn, device_id, note):
     return bool(row[0]), row[1]
 
 
-def control(client, conn, frames, args, catalog, device_id, unit, inbox):
+def control(client, conn, frames, args, catalog, device_id, unit, inbox, drive=None):
     tel = "sgt/nano/%s/tel" % args.demo_imei
     status = "sgt/nano/%s/status" % args.demo_imei
     alert_topic = "sgt/nano/%s/alert" % args.demo_imei
@@ -722,9 +807,11 @@ def control(client, conn, frames, args, catalog, device_id, unit, inbox):
             log.info("simulation %s", "off" if not enabled else
                      "paused: reboot" if rebooting else "paused: signal lost")
         sending = want_send
+        if drive and not sending:
+            drive.halt()
 
         if sending:
-            if scenario == "alerts":
+            if scenario in ("alerts", "driving_alerts"):
                 current = alert_at(time.time() - cycle_start, cycle, args.alert_first,
                                    args.alert_hold, args.alert_gap)
             elif scenario.startswith("alert:"):
@@ -739,11 +826,18 @@ def control(client, conn, frames, args, catalog, device_id, unit, inbox):
                 raised = current
             if pos >= len(frames):
                 pos = 0
+            if drive:
+                drive.step(time.time(), scenario in DRIVING, n)
+            where = (drive.position if drive else None) or gps
             frame = build_frame(frames[pos], n, time.time(), up0, seq0, args.demo_imei,
-                                fill=args.fill, gps=gps, band=args.current_band, alert=current,
+                                fill=args.fill, gps=where, band=args.current_band, alert=current,
                                 setpoint=unit.setpoint)
             if scenario == "engine_off":
                 apply_engine_off(frame)
+                if drive:
+                    drive.speed = 0.0
+            if drive:
+                drive.apply(frame)
             unit.apply(frame)
             pub(tel, frame)
             pos += 1
@@ -860,7 +954,8 @@ def main():
         unit = load_unit(conn, device_id)
         inbox = queue.Queue()
         client = Stdout() if args.dry_run else mqtt_connect(args, inbox)
-        control(client, conn, frames, args, catalog, device_id, unit, inbox)
+        control(client, conn, frames, args, catalog, device_id, unit, inbox,
+                load_drive(conn, device_id))
         if not args.dry_run:
             client.loop_stop()
             client.disconnect()

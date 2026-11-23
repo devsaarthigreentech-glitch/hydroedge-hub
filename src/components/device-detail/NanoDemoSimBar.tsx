@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Device } from "@/types";
 
-interface Scenario { id: string; label: string; detail: string }
+interface Scenario { id: string; label: string; detail: string; severity?: string }
 interface SimState {
   enabled: boolean;
   scenario: string;
@@ -81,6 +81,9 @@ export function NanoDemoSimBar({ device }: { device: Device }) {
   const fixed = scenarios.filter((s) => !s.id.startsWith("alert:"));
   const alerts = scenarios.filter((s) => s.id.startsWith("alert:"));
 
+  // The API sends alerts worst first, so the groups come out in that order.
+  const severities = Array.from(new Set(alerts.map((s) => s.severity || "Other")));
+
   let status: { text: string; color: string };
   if (error) status = { text: error, color: "#f87171" };
   else if (!st!.worker_running) status = { text: "Simulator service is not running on the server", color: "#fbbf24" };
@@ -127,11 +130,11 @@ export function NanoDemoSimBar({ device }: { device: Device }) {
           <optgroup label="Scenarios">
             {fixed.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
           </optgroup>
-          {alerts.length > 0 && (
-            <optgroup label="Hold one alert raised">
-              {alerts.map((s) => <option key={s.id} value={s.id} title={s.detail}>{s.label}</option>)}
+          {severities.map((sev) => (
+            <optgroup key={sev} label={`Hold one alert · ${sev}`}>
+              {alerts.filter((s) => (s.severity || "Other") === sev).map((s) => <option key={s.id} value={s.id} title={s.detail}>{s.label}</option>)}
             </optgroup>
-          )}
+          ))}
         </select>
       </label>
 

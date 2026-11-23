@@ -30,6 +30,7 @@ const WINDOWS: Array<{ h: number; label: string }> = [
   { h: 1, label: "1H" }, { h: 6, label: "6H" }, { h: 24, label: "24H" }, { h: 168, label: "7D" },
 ];
 const POLL_MS = 30000;
+const POLL_FAST_MS = 5000; // 1H window: short enough to watch a vehicle move
 const POLL_MAX_HOURS = 24;
 
 type BaseLayer = "satellite" | "street";
@@ -66,6 +67,8 @@ export function NanoMapTab({ device }: { device: Device }) {
   // Fit the view once per window, not on every poll — a re-centre while the
   // user is panning around is what makes a live map unusable.
   const fittedFor = useRef<number | null>(null);
+  // Last marker position: if it was on screen and the new one isn't, pan to it.
+  const shownAt = useRef<[number, number] | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
   const load = useCallback(async () => {
@@ -86,7 +89,7 @@ export function NanoMapTab({ device }: { device: Device }) {
     fittedFor.current = null;
     load();
     if (hours > POLL_MAX_HOURS) return;
-    const i = setInterval(load, POLL_MS);
+    const i = setInterval(load, hours === 1 ? POLL_FAST_MS : POLL_MS);
     return () => clearInterval(i);
   }, [load, hours]);
 
@@ -160,7 +163,11 @@ export function NanoMapTab({ device }: { device: Device }) {
         fittedFor.current = data.hours;
         if (pts.length > 1) map.fitBounds(L.latLngBounds(pts), { padding: [30, 30], maxZoom: 17 });
         else if (fix) map.setView([fix.lat, fix.lon], 16);
+      } else if (fix && shownAt.current) {
+        const view = map.getBounds();
+        if (view.contains(shownAt.current) && !view.contains([fix.lat, fix.lon])) map.panTo([fix.lat, fix.lon]);
       }
+      shownAt.current = fix ? [fix.lat, fix.lon] : null;
     });
   }, [data, mapReady, device.device_name, device.imei]);
 
@@ -248,7 +255,7 @@ export function NanoMapTab({ device }: { device: Device }) {
       <div style={{ marginTop: 14, fontSize: 11, color: C.faint, lineHeight: 1.6 }}>
         Only frames with a GPS lock (fix &gt; 0) are plotted. Points closer than 10 m to the previous one are dropped,
         so a parked unit shows as a dot rather than a scribble of GNSS jitter — path length is measured on that thinned
-        track. {hours <= POLL_MAX_HOURS ? "Refreshes every 30 s." : "7-day view loads once; press ↻ to refresh."}
+        track. {hours <= POLL_MAX_HOURS ? `Refreshes every ${hours === 1 ? 5 : 30} s.` : "7-day view loads once; press ↻ to refresh."}
       </div>
     </div>
   );
