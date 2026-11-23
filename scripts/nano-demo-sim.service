@@ -1,0 +1,27 @@
+# Demo Nano simulator, switched on and off from GreenVision (DEMO Nano Replay
+# device -> SIMULATION bar). Idle and silent while the switch is off.
+#
+# Install (as root on the droplet):
+#   cp scripts/nano_demo_replay.py /root/sgt-data/
+#   cp scripts/nano-demo-sim.service /etc/systemd/system/
+#   install -m 600 /dev/null /root/sgt-data/demo-sim.env   # then add: PGPASSWORD=...
+#   systemctl daemon-reload && systemctl enable --now nano-demo-sim
+#   journalctl -u nano-demo-sim -f
+#
+# Needs migration 036_nano_demo_sim.sql applied first.
+
+[Unit]
+Description=GreenVision demo Nano simulator (follows nano_demo_sim)
+After=network-online.target postgresql.service mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/sgt-data
+EnvironmentFile=/root/sgt-data/demo-sim.env
+ExecStart=/usr/bin/python3 /root/sgt-data/nano_demo_replay.py --control --demo-imei 999000000000004 --fill --active-only --alert-codes A-03,A-08,A-06,A-01
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

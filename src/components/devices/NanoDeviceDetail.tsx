@@ -15,6 +15,7 @@ import { NanoCanCaptureTab } from "../device-detail/NanoCanCaptureTab";
 import { NanoHealthTab } from "../device-detail/NanoHealthTab";
 import { NanoMapTab } from "../device-detail/NanoMapTab";
 import { NanoFirmwareTab } from "../device-detail/NanoFirmwareTab";
+import { NanoDemoSimBar, isDemoNano } from "../device-detail/NanoDemoSimBar";
 import { useSession } from "next-auth/react";
 
 // Local tab set — independent of the shared Teltonika DeviceTab union.
@@ -130,6 +131,9 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
           </div>
         </div>
       </div>
+
+      {/* ── Simulation switch: admins, DEMO devices only ── */}
+      {(role === "super_admin" || role === "admin") && isDemoNano(device) && <NanoDemoSimBar device={device} />}
 
       {/* ── Tab bar ── */}
       <div
