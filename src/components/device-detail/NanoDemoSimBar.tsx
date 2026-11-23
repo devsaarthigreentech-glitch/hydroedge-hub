@@ -1,11 +1,11 @@
 "use client";
 
 // ============================================================================
-// Simulation switch for DEMO Nano devices
+// Simulation switch for demo Nano units (IMEI 99900...)
 // ----------------------------------------------------------------------------
 // A thin bar under the Nano header: on/off and a scenario. It only writes the
 // nano_demo_sim row (/api/nano/demo-sim); the worker on the server does the
-// simulating. Rendered for admins on DEMO devices only, see isDemoNano().
+// simulating. Rendered for admins on demo units only, see isDemoNano().
 // ============================================================================
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -20,9 +20,9 @@ interface SimState {
   worker_note: string | null;
 }
 
-/** Same guard as the API and the worker: 99900… IMEI and a DEMO… name. */
+/** Same guard as the API and the worker: no real unit has a 99900... IMEI. */
 export function isDemoNano(device: Device): boolean {
-  return String(device.imei || "").startsWith("99900") && String(device.device_name || "").startsWith("DEMO");
+  return device.protocol === "nano" && String(device.imei || "").startsWith("99900");
 }
 
 export function NanoDemoSimBar({ device }: { device: Device }) {
@@ -85,6 +85,9 @@ export function NanoDemoSimBar({ device }: { device: Device }) {
   if (error) status = { text: error, color: "#f87171" };
   else if (!st!.worker_running) status = { text: "Simulator service is not running on the server", color: "#fbbf24" };
   else if (!on) status = { text: "Off · no frames are being sent", color: "#9ca3af" };
+  else if (st!.worker_note?.includes("stopped by command"))
+    status = { text: "Sending · plant stopped by command, press START to run it", color: "#fbbf24" };
+  else if (st!.worker_note?.startsWith("rebooting")) status = { text: "Rebooting", color: "#fbbf24" };
   else status = { text: `Sending · ${current?.detail || st!.scenario}`, color: "#4ade80" };
 
   return (

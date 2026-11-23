@@ -4,8 +4,8 @@
 // GET  ?device_id=uuid                 current switch, worker liveness, scenarios
 // POST { device_id, enabled?, scenario? }  turn the simulation on/off, pick a scenario
 //
-// Admins only, and demo devices only: the IMEI must start with 99900 and the
-// name with DEMO (the same guard nano_demo_replay.py applies). The app never
+// Admins only, and demo devices only: a Nano whose IMEI starts with 99900, which
+// no real unit has (the same guard nano_demo_replay.py applies). The app never
 // runs the simulator itself; it writes nano_demo_sim and the worker on the
 // server (nano_demo_replay.py --control) follows it. See migration 036.
 // ============================================================================
@@ -15,7 +15,6 @@ import { query } from '@/lib/db';
 import { requireAdmin } from '@/lib/require-admin';
 
 const DEMO_IMEI_PREFIX = '99900';
-const DEMO_NAME_PREFIX = 'DEMO';
 /** The worker stamps worker_seen_at every poll (~3 s); older than this = not running. */
 const WORKER_FRESH_S = 20;
 
@@ -30,13 +29,13 @@ const SCENARIO_RE = /^alert:[A-Za-z0-9_-]{1,16}$/;
 
 async function demoDevice(deviceId: string) {
   const r = await query(
-    `SELECT id::text AS id, imei::text AS imei, device_name FROM devices WHERE id = $1`,
+    `SELECT id::text AS id, imei::text AS imei, protocol FROM devices WHERE id = $1`,
     [deviceId]
   );
   const d = r.rows[0];
   if (!d) return { error: 'Device not found', status: 404 };
-  if (!String(d.imei).startsWith(DEMO_IMEI_PREFIX) || !String(d.device_name || '').startsWith(DEMO_NAME_PREFIX)) {
-    return { error: 'Simulation is only for DEMO devices', status: 403 };
+  if (d.protocol !== 'nano' || !String(d.imei).startsWith(DEMO_IMEI_PREFIX)) {
+    return { error: 'Simulation is only for demo units (IMEI 99900...)', status: 403 };
   }
   return { device: d };
 }

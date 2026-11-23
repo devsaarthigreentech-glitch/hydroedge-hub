@@ -132,7 +132,7 @@ export function NanoDeviceDetail({ device, onClose, customers = [] }: NanoDevice
         </div>
       </div>
 
-      {/* ── Simulation switch: admins, DEMO devices only ── */}
+      {/* ── Simulation switch: admins, demo units only ── */}
       {(role === "super_admin" || role === "admin") && isDemoNano(device) && <NanoDemoSimBar device={device} />}
 
       {/* ── Tab bar ── */}

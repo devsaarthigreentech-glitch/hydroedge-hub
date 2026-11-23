@@ -29,6 +29,7 @@ import json
 import logging
 import math
 import os
+import queue
 import signal
 import sys
 import time
@@ -148,7 +149,8 @@ def alert_at(t, alerts, first, hold, gap):
     return alerts[int(index) % len(alerts)] if into < hold else None
 
 
-def build_frame(src, n, now, up0, seq0, demo_imei, fill=False, gps=None, band=0, alert=None):
+def build_frame(src, n, now, up0, seq0, demo_imei, fill=False, gps=None, band=0, alert=None,
+                setpoint=None):
     """A stored frame -> a fresh telemetry payload stamped as the demo device."""
     d = dict(src.get("d") or {})
     if fill:
@@ -160,6 +162,8 @@ def build_frame(src, n, now, up0, seq0, demo_imei, fill=False, gps=None, band=0,
                     d[pid] = val
             elif pid not in d and pid not in FAULT_ONLY_PIDS:
                 d[pid] = val
+    if setpoint is not None:
+        d["P-802"] = setpoint
     apply_current_band(d, n, band)
     frame = {
         "v": src.get("schema_v"),
@@ -327,13 +331,25 @@ def cleanup_device(conn, args):
 # MQTT
 # --------------------------------------------------------------------------- #
 
-def mqtt_connect(args):
+def mqtt_connect(args, inbox=None):
+    """inbox: a queue that receives the demo unit's /cmd payloads (--control)."""
     import paho.mqtt.client as mqtt
     client_id = "gv-nano-demo-replay"
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
     except (AttributeError, TypeError):          # paho-mqtt < 2.0
         client = mqtt.Client(client_id=client_id)
+    if inbox is not None:
+        topic = "sgt/nano/%s/cmd" % args.demo_imei
+
+        def on_connect(c, userdata, flags, rc, properties=None):
+            c.subscribe(topic, qos=1)               # again after every reconnect
+
+        def on_message(c, userdata, msg):
+            if not msg.retain:
+                inbox.put(msg.payload)
+
+        client.on_connect, client.on_message = on_connect, on_message
     client.connect(args.broker_host, args.broker_port, keepalive=60)
     client.loop_start()
     return client
@@ -433,15 +449,195 @@ def apply_engine_off(frame):
 
 def demo_device_id(conn, args):
     with conn.cursor() as cur:
-        cur.execute("SELECT id::text, device_name FROM devices WHERE imei::text = %s LIMIT 1;",
+        cur.execute("SELECT id::text FROM devices WHERE imei::text = %s LIMIT 1;",
                     (args.demo_imei,))
         row = cur.fetchone()
     conn.commit()
     if not row:
         sys.exit("no device with imei %s: run --setup first" % args.demo_imei)
-    if not (row[1] or "").startswith(DEMO_NAME_PREFIX):
-        sys.exit("refusing: device %s is named %r, not %s..." % (row[0], row[1], DEMO_NAME_PREFIX))
-    return row[0]
+    return row[0]                       # require_demo_imei() has checked the 99900 prefix
+
+
+# --- commands --------------------------------------------------------------- #
+# Answers what GreenVision's Commands and Config tabs send, the way NanoV3's
+# config_manager / connectivity_owner do, so a set moves the simulated plant.
+
+REPLY_DELAY = 1.5        # the app marks a command "sent" just after publishing
+                         # it; an instant answer would be overwritten by that
+REBOOT_GRACE, REBOOT_DOWN = 4, 20
+NUMERIC = {"float", "int16", "uint16", "uint32", "uint8", "int", "uint"}
+
+
+def not_simulated(pid):
+    """Actions with their own follow-up traffic (OTA, CAN capture, CAN sim)."""
+    return pid.startswith("P-53") or pid in ("P-4220", "P-4224", "P-4227")
+
+
+class SimUnit:
+    """The demo unit's parameters, and its answers to /cmd frames."""
+
+    def __init__(self, registry, saved):
+        self.registry = registry         # pid -> {type, enums, range, access, default}
+        self.values = dict(saved)        # pid -> value, as the unit last reported it
+        self.replies = []                # [due, t:cfg fields, plant changed?]
+        self.reboot_at = None
+
+    def value(self, pid):
+        if pid in self.values:
+            return self.values[pid]
+        default = self.registry.get(pid, {}).get("default")
+        if default is None:
+            return ""
+        try:
+            return self.parse(pid, default)
+        except ValueError:
+            return default
+
+    @property
+    def stopped(self):
+        return str(self.value("P-1101")).lower() == "stop"
+
+    @property
+    def setpoint(self):
+        v = self.value("P-802")
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    def bounds(self, pid):
+        if pid == "P-802":               # the firmware checks against the live ceiling
+            top = self.value("P-803")
+            return 0.0, float(top) if isinstance(top, (int, float)) else 30.0
+        lo, sep, hi = str(self.registry.get(pid, {}).get("range") or "").partition("..")
+        try:
+            return (float(lo), float(hi)) if sep else None
+        except ValueError:
+            return None
+
+    def parse(self, pid, raw):
+        """raw as this parameter's own type, or ValueError with the unit's reason."""
+        meta = self.registry[pid]
+        kind = meta["type"]
+        if kind == "bool":
+            text = str(raw).strip().lower()
+            if text in ("true", "1", "on"):
+                return True
+            if text in ("false", "0", "off"):
+                return False
+            raise ValueError("want true/false")
+        if kind in NUMERIC:
+            try:
+                num = float(raw)
+            except (TypeError, ValueError):
+                num = math.nan
+            if isinstance(raw, bool) or not math.isfinite(num):
+                raise ValueError("want number")
+            if kind != "float" and num != int(num):
+                raise ValueError("want integer")
+            rng = self.bounds(pid)
+            if rng and not rng[0] <= num <= rng[1]:
+                raise ValueError("range %g..%g" % rng)
+            return num if kind == "float" else int(num)
+        if meta["enums"]:
+            for option in meta["enums"]:
+                if option.lower() == str(raw).strip().lower():
+                    return option
+            raise ValueError("want one of: %s" % " | ".join(meta["enums"]))
+        return str(raw)
+
+    def reply(self, now, pid, val, res="ok", changed=False):
+        if res == "ok" and self.registry.get(pid, {}).get("access") == "WO":
+            val = "***" if val != "" else ""
+        self.replies.append([now + REPLY_DELAY, {"id": pid, "val": val, "res": res}, changed])
+
+    def nack(self, now, pid, val, reason):
+        self.reply(now, pid or "?", val if val is not None else "", reason[:63])
+        # The ingest stores a refused value like any other, so the screens would
+        # show it as the unit's own. Report the value the unit still holds.
+        if pid in self.registry:
+            self.reply(now, pid, self.value(pid))
+
+    def set(self, now, pid, raw):
+        meta = self.registry.get(pid)
+        if meta is None or meta["access"] not in ("RW", "WO"):
+            return self.nack(now, pid, raw, "not settable (%s)" % pid)
+        if not_simulated(pid):
+            return self.nack(now, pid, raw, "not simulated")
+        try:
+            self.values[pid] = self.parse(pid, raw)
+        except ValueError as e:
+            return self.nack(now, pid, raw, str(e))
+        self.reply(now, pid, self.values[pid], changed=True)
+        if pid == "P-803" and self.setpoint is not None and self.setpoint > self.values[pid]:
+            self.values["P-802"] = self.values[pid]      # firmware clamps and reports it
+            self.reply(now, "P-802", self.values["P-802"], changed=True)
+
+    def command(self, raw, now):
+        try:
+            c = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            c = None
+        if not isinstance(c, dict):
+            return self.nack(now, "", "", "bad json")
+        verb, pid = c.get("cmd"), str(c.get("id") or "")
+        log.info("command: %s %s", verb, pid)
+        if verb == "set":
+            if not pid or "val" not in c:
+                self.nack(now, pid, "", "set needs id+val")
+            else:
+                self.set(now, pid, c["val"])
+        elif verb in ("stop", "start"):
+            self.set(now, "P-1101", "Stop" if verb == "stop" else "Run")
+        elif verb == "get":
+            if pid in self.registry:
+                self.reply(now, pid, self.value(pid))
+            else:
+                self.nack(now, pid, "", "unknown id (%s)" % pid)
+        elif verb == "getall":
+            for known in self.registry:
+                self.reply(now, known, self.value(known))
+        elif verb == "reboot":
+            self.reply(now, "reboot", "", "rebooting")
+            self.reboot_at = now + REPLY_DELAY + REBOOT_GRACE
+        elif verb == "rs485":
+            self.nack(now, "rs485", c.get("val"), "rs485 unsupported")
+        else:
+            self.nack(now, pid, "", "unknown cmd")
+
+    def due(self, now, limit=5):
+        """Up to limit replies whose time has come, oldest first."""
+        out = []
+        while self.replies and len(out) < limit and self.replies[0][0] <= now:
+            out.append(self.replies.pop(0))
+        return out
+
+    def apply(self, frame):
+        """STOP is latching and outranks whatever the scenario shows."""
+        if self.stopped:
+            frame["d"].update({"P-4114": True, "P-4126": False, "P-4110": False,
+                               "P-4111": False, "P-4112": False, "P-4075": 0.0})
+
+
+def load_unit(conn, device_id):
+    with conn.cursor() as cur:
+        cur.execute("SELECT pid, data_type, enum_values, valid_range, access, default_value "
+                    "FROM nano_registry WHERE generations IS NULL OR 'NanoV3' = ANY(generations) "
+                    "ORDER BY pid;")
+        registry = {r[0]: {"type": r[1], "enums": r[2], "range": r[3], "access": r[4],
+                           "default": r[5]} for r in cur.fetchall()}
+        # res <> 'ok' is a refused value, not one the unit holds.
+        cur.execute("SELECT pid, value_text FROM nano_param_values "
+                    "WHERE device_id = %s AND value_text IS NOT NULL "
+                    "AND COALESCE(res, 'ok') = 'ok';", (device_id,))
+        rows = cur.fetchall()
+    conn.commit()
+    unit = SimUnit(registry, {})
+    # P-803 first: it bounds P-802.
+    for pid, text in sorted(rows, key=lambda r: r[0] != "P-803"):
+        if pid in registry:
+            try:
+                unit.values[pid] = unit.parse(pid, text)
+            except ValueError:
+                log.warning("saved %s=%r ignored, using the default", pid, text)
+    return unit
 
 
 def read_switch(conn, device_id, note):
@@ -456,11 +652,13 @@ def read_switch(conn, device_id, note):
     return bool(row[0]), row[1]
 
 
-def control(client, conn, frames, args, catalog, device_id):
+def control(client, conn, frames, args, catalog, device_id, unit, inbox):
     tel = "sgt/nano/%s/tel" % args.demo_imei
     status = "sgt/nano/%s/status" % args.demo_imei
     alert_topic = "sgt/nano/%s/alert" % args.demo_imei
     gps = tuple(float(x) for x in args.gps.split(",")) if args.gps else None
+    # "Producing" scenarios: skip frames where the engine ran but the plant did not.
+    frames = [f for f in frames if (f.get("d") or {}).get("P-4126")] or frames
     by_id = {a["id"]: a for a in catalog}
     codes = [c.strip() for c in args.alert_codes.split(",")] if args.alert_codes else None
     cycle = [by_id[c] for c in codes if c in by_id] if codes else pick_alerts(catalog, None)
@@ -479,6 +677,8 @@ def control(client, conn, frames, args, catalog, device_id):
     n = pos = 0
     sending, scenario, raised, cycle_start = False, None, None, now
     note = "starting"
+    down_until = 0                       # rebooting: silent until then
+    log.info("unit starts at P-802=%s, P-1101=%s", unit.value("P-802"), unit.value("P-1101"))
     log.info("control mode: following nano_demo_sim for device %s", device_id)
 
     while not stopping:
@@ -497,7 +697,13 @@ def control(client, conn, frames, args, catalog, device_id):
                 log.warning("reconnect failed: %s", e2)
             continue
 
-        want_send = enabled and want != "offline"
+        now = time.time()
+        if unit.reboot_at and now >= unit.reboot_at:
+            log.info("rebooting")
+            unit.reboot_at, unit.replies, down_until = None, [], now + REBOOT_DOWN
+            up0 = down_until                         # uptime restarts, as on a real unit
+        rebooting = now < down_until
+        want_send = enabled and want != "offline" and not rebooting
         if want != scenario:
             log.info("scenario: %s -> %s", scenario, want)
             if raised:
@@ -511,9 +717,10 @@ def control(client, conn, frames, args, catalog, device_id):
             if raised:
                 pub(alert_topic, alert_payload(raised, "clear", time.time()))
                 raised = None
-            if not enabled:
-                send_status("offline")           # switched off
-            log.info("simulation %s", "off" if not enabled else "paused: signal lost")
+            if not enabled or rebooting:
+                send_status("offline")
+            log.info("simulation %s", "off" if not enabled else
+                     "paused: reboot" if rebooting else "paused: signal lost")
         sending = want_send
 
         if sending:
@@ -533,18 +740,39 @@ def control(client, conn, frames, args, catalog, device_id):
             if pos >= len(frames):
                 pos = 0
             frame = build_frame(frames[pos], n, time.time(), up0, seq0, args.demo_imei,
-                                fill=args.fill, gps=gps, band=args.current_band, alert=current)
+                                fill=args.fill, gps=gps, band=args.current_band, alert=current,
+                                setpoint=unit.setpoint)
             if scenario == "engine_off":
                 apply_engine_off(frame)
+            unit.apply(frame)
             pub(tel, frame)
             pos += 1
             n += 1
-            note = "sending %s, %d frames" % (scenario, n)
+            note = "sending %s, %d frames%s" % (scenario, n,
+                                                ", stopped by command" if unit.stopped else "")
+        elif rebooting and enabled:
+            note = "rebooting"
         else:
             note = "idle (%s)" % ("off" if not enabled else "signal lost")
 
+        # Between frames: take commands and answer them. A unit that is off, out
+        # of coverage or restarting never sees them; GreenVision's retry sends
+        # set / stop / start again once it is back.
         deadline = time.time() + args.interval
         while not stopping and time.time() < deadline:
+            while True:
+                try:
+                    raw = inbox.get_nowait()
+                except queue.Empty:
+                    break
+                if sending:
+                    unit.command(raw, time.time())
+            if not sending:
+                unit.replies, unit.reboot_at = [], None
+            for _, fields, changed in unit.due(time.time()):
+                pub(tel, dict({"v": 2, "t": "cfg", "ts": int(time.time())}, **fields))
+                if changed:
+                    deadline = 0                     # show the change at once
             time.sleep(min(0.2, args.interval))
 
     if raised:
@@ -629,8 +857,10 @@ def main():
         if not frames:
             sys.exit("no frames found for %s in the last %d days" % (args.source_imei, args.days))
         device_id = demo_device_id(conn, args)
-        client = Stdout() if args.dry_run else mqtt_connect(args)
-        control(client, conn, frames, args, catalog, device_id)
+        unit = load_unit(conn, device_id)
+        inbox = queue.Queue()
+        client = Stdout() if args.dry_run else mqtt_connect(args, inbox)
+        control(client, conn, frames, args, catalog, device_id, unit, inbox)
         if not args.dry_run:
             client.loop_stop()
             client.disconnect()
