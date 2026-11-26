@@ -68,8 +68,8 @@ export interface Device {
   /**
    * Commissioned setpoint as the RAW Ain.1 value (millivolts), matching
    * io_records.io_value for io_id 9. Deviation alarms compare raw against raw
-   * so they stay correct regardless of the amps divisor (47 on FMC650, 83 on
-   * FMB). Shown to users as amps. NULL = not commissioned; alarms suppressed.
+   * so they stay correct regardless of the amps divisor (47 FMC650, 83 FMB150,
+   * 214 FMB120). Shown to users as amps. NULL = not commissioned; alarms suppressed.
    */
   set_ain1_raw?: number | null;
   /**

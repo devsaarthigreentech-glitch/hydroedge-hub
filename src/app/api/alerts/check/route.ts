@@ -2737,7 +2737,7 @@ const CURRENT_IO = 9;
 /** Deviation band applied either side of the setpoint. */
 const SETPOINT_TOLERANCE = 0.1;
 
-/** FMC650 current transducer divisor. FMB150/FMB120 use 83. */
+/** FMC650 current transducer divisor. FMB150 uses 83, FMB120 214 (FMB alarms compare raw, so unused here). */
 const FMC650_CURRENT_DIV = 47;
 
 /** Convert a raw Ain.1 reading to amps for DISPLAY only. Never for comparison. */

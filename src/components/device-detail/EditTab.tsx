@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Device, Customer } from "@/types";
 import { THEME } from "@/lib/theme";
 import { ASSET_SERIES, getAssetSeries } from "@/lib/asset-series";
+import { currentDivisorFor } from "@/lib/dg-metrics";
 
 interface EditTabProps {
   device: Device;
@@ -378,7 +379,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
 
         {/* Set point — stored as the RAW Ain.1 value, drives the ±10% deviation
             alarm. Raw rather than amps so the threshold survives a correction to
-            the amps divisor (47 on FMC650, 83 on FMB) — see migration 007. */}
+            the amps divisor (47 FMC650, 83 FMB150, 214 FMB120) — see migration 007. */}
         <div style={{ marginBottom: 20 }}>
           <label style={labelStyle}>Set Point — Ain.1 Voltage (V)</label>
           <input
@@ -398,7 +399,7 @@ export function EditTab({ device, customers, onSaved, onDeleted }: EditTabProps)
               (() => {
                 // Display-only conversion. The stored value and the alarm
                 // comparison both stay in raw millivolts.
-                const divisor = formData.device_type === "FMC650" ? 47 : 83;
+                const divisor = currentDivisorFor(formData.device_type);
                 const volts = Number(formData.set_ain1_volts);
                 const raw = volts * 1000;
                 const amps = (raw / divisor).toFixed(1);

@@ -57,7 +57,7 @@ export const DG_MOVED_KM = 20;
 export const MIN_FIXES_FOR_MOVE = 10;
 
 /** Ain.1 raw (millivolts) → amps. The transducer differs per hardware. */
-const CURRENT_DIVISOR: Record<string, number> = { FMC650: 47, FMB150: 83, FMB120: 83 };
+const CURRENT_DIVISOR: Record<string, number> = { FMC650: 47, FMB150: 83, FMB120: 214 };
 
 export function currentDivisorFor(deviceType: string): number {
   return CURRENT_DIVISOR[(deviceType || "").trim()] ?? 83;

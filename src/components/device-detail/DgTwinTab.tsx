@@ -26,6 +26,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Device } from "@/types";
+import { currentDivisorFor } from "@/lib/dg-metrics";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 interface TelemetryParam {
@@ -159,7 +160,7 @@ interface TwinState {
 function deriveState(device: Device, t: TelemetryParam[]): TwinState {
   const model = dgModelFor(device);
   const isFMC = device.device_type === "FMC650";
-  const divisor = isFMC ? 47 : 83;
+  const divisor = currentDivisorFor(device.device_type);
   const hasBubbler = isFMC;
   const hasMainTank = isFMC && (model === "380KVA" || model === "625KVA" || model === "EOW");
 

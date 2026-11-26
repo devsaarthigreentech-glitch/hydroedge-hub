@@ -1387,19 +1387,18 @@ function calcCurrentFMB150(telemetry: TelemetryParam[]): number | null {
 //
 //   • Current/CT input → IO 9 (Ain.1). CONFIRMED: FMB120 emits Analog Input 1
 //     on AVL ID 9 (Teltonika data-sending params). Same slot as FMB150.
-//   • Current divisor  → defaulted to 83 (same transducer as FMB150). CONFIRM
-//     against real device current with the SQL query I gave you.
+//   • Current divisor  → 214 (set 2026-11-26; FMB150 stays on 83).
 //   • Water input      → defaulted to IO 6 (same as FMB150). CONFIRM — if your
 //     FMB120 units wire the level sensor to the standard Analog Input 2, that
 //     is IO 10, not IO 6. Flip this one constant if so.
 const FMB120_CURRENT_IO  = 9;
-const FMB120_CURRENT_DIV = 83;
+const FMB120_CURRENT_DIV = 214;
 const FMB120_WATER_IO    = 6;
 
 // ─── Setpoint helpers ─────────────────────────────────────────────────────────
 // The commissioned setpoint is stored as the RAW Ain.1 value (millivolts), not
 // as amps — see migration 007. Amps are a presentation concern derived through a
-// per-hardware divisor, and the FMB120 divisor is still unconfirmed (below). If
+// per-hardware divisor (FMC650 47, FMB150 83, FMB120 214). If
 // the setpoint were stored in amps, correcting that divisor would silently
 // re-threshold every commissioned device. Comparing raw against raw means a
 // divisor change only alters what is displayed, never what alarms.
@@ -1411,7 +1410,9 @@ const CURRENT_IO = 9;
 const SETPOINT_TOLERANCE = 0.1;
 
 function currentDivisorFor(deviceType: string): number {
-  return deviceType === "FMC650" ? 47 : 83;
+  if (deviceType === "FMC650") return 47;
+  if (deviceType === "FMB120") return FMB120_CURRENT_DIV;
+  return 83;
 }
 
 /** Convert a raw Ain.1 reading to amps for DISPLAY only. Never for comparison. */

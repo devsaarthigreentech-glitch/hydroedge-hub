@@ -4,7 +4,7 @@ import {
   fetchDgEngine, fetchDgOutput, fetchDgHealth, fetchDgMovement,
   buildDgDaily, istDaysBetween,
   DgEngine, DgOutput, DgHealth, DgMovement,
-  DG_MOVED_KM, LOAD_THRESHOLD_A,
+  DG_MOVED_KM, LOAD_THRESHOLD_A, currentDivisorFor,
 } from "@/lib/dg-metrics";
 
 // ============================================================================
@@ -217,7 +217,7 @@ export async function GET(request: NextRequest) {
     const rawSet = device.set_ain1_raw != null ? parseFloat(device.set_ain1_raw) : null;
     const setAmps =
       rawSet !== null && !isNaN(rawSet)
-        ? parseFloat((rawSet / (device.device_type === "FMC650" ? 47 : 83)).toFixed(1))
+        ? parseFloat((rawSet / currentDivisorFor(device.device_type)).toFixed(1))
         : null;
 
     // Hours the window spans, so "data availability" is honest for a part-day
